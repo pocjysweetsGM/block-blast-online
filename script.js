@@ -2,14 +2,13 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
-// HAND_CELL_SIZEは動的計算のため定数削除
 const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
 const DRAG_OFFSET_Y = 80; 
 
 const THEMES = {
-    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)', remoteGhost: 'rgba(231, 76, 60, 0.4)' },
-    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)', remoteGhost: 'rgba(214, 48, 49, 0.4)' }
+    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
+    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 let currentTheme = 'dark';
 function toggleTheme(checkbox) {
@@ -90,11 +89,8 @@ let totalPlayers = 0;
 let timerInterval = null;
 let voteNotificationTimer = null;
 let prevSkipVotesLen = 0;
-let remoteDrags = {};
 let comboCount = 0;
 let lastClearTurnId = -1;
-// ★修正: 重複していた変数を1つに統一（ファイルの先頭近くで宣言するのがベストですが、ロジックの近くでもOK）
-let lastSentTime = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -182,29 +178,26 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
-// --- 通信関連 ---
 function startGame() {
+    sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
     const nameInput = document.getElementById('nameInput').value.trim();
     if (!roomInput) { document.getElementById('error-msg').innerText = "合言葉を入力してください"; return; }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
-    
     if (ws) ws.close();
     ws = new WebSocket(url);
-
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
-        // ★初期化時にも手札を補充
+        // 初期化時に手札補充
         if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         draw();
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
-
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -213,12 +206,12 @@ function startGame() {
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
             updateBoard(data.board);
+            // 手札補充
             if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         }
         else if (data.type === "game_state") {
             document.getElementById('online-count').innerText = `ONLINE: ${data.count}/10`;
             totalPlayers = data.count;
-            if (currentTurnId !== data.current_turn) { remoteDrags = {}; }
             currentTurnId = data.current_turn;
             turnStartTime = data.turn_start_time;
             currentSkipVotes = data.skip_votes;
@@ -231,7 +224,6 @@ function startGame() {
             updateButtons();
             updateVotePopup();
             
-            // 手札補充
             if (currentHand.length === 0 || currentHand.every(s => s === null)) {
                 refillHand();
             }
@@ -259,12 +251,6 @@ function startGame() {
                 comboCount = 0; 
             }
         }
-        else if (data.type === "remote_drag") {
-            remoteDrags[data.player_id] = { shape_idx: data.shape_idx, row: data.row, col: data.col };
-        }
-        else if (data.type === "remote_drag_end") {
-            delete remoteDrags[data.player_id];
-        }
         else if (data.type === "init") updateBoard(data.board);
         else if (data.type === "game_over") showModal("GAME OVER", "100 Rounds Completed!", () => location.reload());
     };
@@ -286,6 +272,7 @@ function checkTurnTimer() {
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted'); else resetBtn.classList.remove('voted');
+
     const skipBtn = document.getElementById('action-skip-btn');
     const skipIcon = document.getElementById('skip-icon');
     if (currentTurnId === myPlayerId) {
@@ -323,22 +310,6 @@ window.voteSkip = function() { sound.playButton(); ws.send(JSON.stringify({type:
 window.vetoSkip = function() { sound.playButton(); ws.send(JSON.stringify({type: 'veto_skip'})); };
 window.handleExit = function() { showModal("EXIT", "退出しますか？", () => { if (ws) { ws.close(); ws = null; } location.reload(); }, true); };
 function kickPlayer(targetId) { if(confirm("Kick this player?")) ws.send(JSON.stringify({type: 'kick_player', target_id: targetId})); }
-function openRankingModal() { sound.playButton(); document.getElementById('ranking-modal').style.display = 'flex'; }
-function closeRankingModal(e) { if(e === null || e.target.id === 'ranking-modal') { sound.playButton(); document.getElementById('ranking-modal').style.display = 'none'; } }
-function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }
-function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p.name); const indicator = document.getElementById('turn-indicator'); const canvasEl = document.getElementById('gameCanvas'); if (currentTurnId === myPlayerId) { indicator.innerText = "YOUR TURN"; indicator.classList.add('my-turn'); canvasEl.classList.remove('inactive-canvas'); } else { const name = playerNames[currentTurnId] || `PLAYER ${currentTurnId}`; indicator.innerText = `TURN: ${name}`; indicator.classList.remove('my-turn'); canvasEl.classList.add('inactive-canvas'); } }
-function updateRanking(rankingData) { 
-    const list = document.getElementById('score-list'); list.innerHTML = ""; 
-    const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
-    rankingData.forEach(player => { 
-        const isMe = (player.id === myPlayerId); const isTurn = (player.id === currentTurnId); 
-        let text = player.name.toUpperCase(); if(player.id === hostId) text = "👑 " + text;
-        const li = document.createElement('li'); 
-        let className = ""; if (isMe) className += "highlight-me "; if (isTurn) className += "turn-active "; 
-        li.className = className; li.innerHTML = `<span>${text}</span> <span>${player.score}</span>`; list.appendChild(li); 
-        const fullLi = li.cloneNode(true); if (myPlayerId === hostId && player.id !== myPlayerId) { const kickBtn = document.createElement('button'); kickBtn.className = 'kick-btn'; kickBtn.innerText = 'KICK'; kickBtn.onclick = (e) => { e.stopPropagation(); kickPlayer(player.id); }; fullLi.appendChild(kickBtn); } fullList.appendChild(fullLi); 
-    }); 
-}
 
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
@@ -359,11 +330,7 @@ function draw() {
     }
     ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1;
 
-    for (let pid in remoteDrags) {
-        const d = remoteDrags[pid]; const shape = SHAPES[d.shape_idx]; ctx.fillStyle = theme.remoteGhost;
-        for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect((d.col + c) * CELL_SIZE, (d.row + r) * CELL_SIZE, CELL_SIZE, CELL_SIZE); } } }
-    }
-
+    // 自分自身の描画 (ゴーストなし)
     if (draggingIdx !== -1 && currentTurnId === myPlayerId && !isClearing) {
         const shape = currentHand[draggingIdx];
         const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
@@ -390,19 +357,22 @@ function drawHand(theme) {
     currentHand.forEach((shape, index) => {
         if (shape === null) return;
         const slotCenterX = (index * slotWidth) + (slotWidth / 2);
+        
         const originalW = shape[0].length * 30;
         const originalH = shape.length * 30;
+        
         const maxSlotSize = slotWidth * 0.8;
         let scale = 1.0;
         if (originalW > maxSlotSize || originalH > maxSlotSize) {
             scale = maxSlotSize / Math.max(originalW, originalH);
         }
+
         const drawW = originalW * scale;
         const drawH = originalH * scale;
         const blockSize = 30 * scale;
 
         if (index === draggingIdx) {
-            // ★修正: ここでthemeを渡す！
+            // ★修正: themeを渡す
             drawShape(shape, dragX, dragY, CELL_SIZE, 'rgba(52, 152, 219, 0.7)', theme);
         } else {
             const color = (currentTurnId === myPlayerId && !isClearing) ? theme.blockColor : theme.inactiveHand;
@@ -417,7 +387,7 @@ function drawShape(shape, startX, startY, size, color, theme) {
         for(let c = 0; c < shape[r].length; c++) {
             if(shape[r][c] === 1) {
                 ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2);
-                // ★修正: themeがあるかチェック (ドラッグ中もthemeを渡すようにしたので安全)
+                // ★安全策: themeがnullでもエラーにならないように
                 if (theme && theme.blockGloss) {
                     ctx.fillStyle = theme.blockGloss;
                     ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
@@ -453,13 +423,6 @@ function handleMove(e) {
         const pos = getCanvasCoordinates(e); const shape = currentHand[draggingIdx]; 
         const blockW = shape[0].length * CELL_SIZE; const blockH = shape.length * CELL_SIZE; 
         dragX = pos.x - (blockW / 2); dragY = pos.y - blockH - DRAG_OFFSET_Y; 
-        
-        const now = Date.now();
-        if (now - lastSentTime > 100) {
-            const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
-            let shapeIdx = -1; for(let i=0; i<SHAPES.length; i++) { if(SHAPES[i] === shape) { shapeIdx = i; break; } }
-            if(shapeIdx !== -1) { ws.send(JSON.stringify({ type: "drag_move", shape_idx: shapeIdx, row: placeRow, col: placeCol })); lastSentTime = now; }
-        }
     } 
 }
 function handleEnd(e) {
@@ -469,7 +432,6 @@ function handleEnd(e) {
         const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
         let canPlace = true;
         for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false; else if (board[placeRow + r][placeCol + c] === 1) canPlace = false; } } }
-        ws.send(JSON.stringify({type: "drag_end"}));
 
         if (canPlace) {
             sound.playPlace();
@@ -487,5 +449,5 @@ function handleEnd(e) {
 }
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
 
-// ★初期化: ファイル読み込み時にも手札を作っておく
+// ★初期化時にも手札を作る
 if(currentHand.length === 0) refillHand();

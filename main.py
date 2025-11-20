@@ -33,8 +33,7 @@ class GameRoom:
         self.total_turns_taken: int = 0
         self.MAX_ROUNDS: int = 100
         self.host_id: int = 0
-        
-        # 消去演出中の操作ブロック用フラグ
+        self.is_playing: bool = False
         self.is_clearing: bool = False
 
         self.turn_start_time: float = 0
@@ -54,15 +53,13 @@ class GameRoom:
         self.skip_votes.clear()
         self.turn_start_time = time.time()
         self.total_turns_taken += 1
-        self.is_clearing = False # ターン交代でフラグ解除
+        self.is_clearing = False
         
         if not self.active_connections:
             self.current_turn = 0
             return
 
         ids = sorted(list(self.active_connections.values()))
-        
-        # 現在のターンプレイヤーがいない、または0の場合は先頭へ
         if self.current_turn == 0 or self.current_turn not in ids:
             self.current_turn = ids[0]
             return
@@ -121,13 +118,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     else:
         room.scores[current_player_id] = 0
 
-    # ホスト選定
     if room.host_id == 0 or room.host_id not in room.active_connections.values():
         all_ids = sorted(list(room.active_connections.values()))
         room.host_id = all_ids[0]
 
-    # ★修正: ターン初期化の強化
-    # 誰もターンを持っていない、またはターンプレイヤーが不在なら再設定
     all_ids = sorted(list(room.active_connections.values()))
     if room.current_turn == 0 or room.current_turn not in all_ids:
         if all_ids:
@@ -166,7 +160,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             "reset_votes": list(room.reset_votes),
             "host_id": room.host_id,
             "round_info": f"{current_round}/{room.MAX_ROUNDS}",
-            "is_clearing": room.is_clearing # クライアント側で操作ブロックするため
+            "is_clearing": room.is_clearing
         }
         await room.broadcast(message)
 
@@ -219,7 +213,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             await target_ws.close()
 
                 elif msg_type == "batch_update":
-                    # ★重要: ターンチェック + 消去演出中は操作禁止
                     if room.current_turn != current_player_id or room.is_clearing:
                          continue
 
@@ -239,9 +232,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         if all(room.board[r][c] == 1 for r in range(8)): cols_to_clear.append(c)
 
                     if rows_to_clear or cols_to_clear:
-                        # ★消去中は操作ブロック
                         room.is_clearing = True
-                        # 即座に状態を送信して他人の操作も止める
                         await broadcast_room_state() 
 
                         lines_count = len(rows_to_clear) + len(cols_to_clear)
@@ -262,7 +253,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         
                         await room.broadcast({"type": "batch_update", "updates": cleared_updates})
                         
-                        # 消去完了でロック解除
                         room.is_clearing = False
                         await broadcast_room_state()
 
@@ -272,12 +262,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         current_round = (room.total_turns_taken // player_count) + 1
                         if current_round > room.MAX_ROUNDS:
                             await room.broadcast({"type": "game_over", "ranking": []})
-                            # 終了後はターンリセットしない（そのまま）
+                            room.is_playing = False 
                         else:
                             room.rotate_turn()
                             await broadcast_room_state()
                 
-                # ... 他のイベントハンドラ (voteなど) は変更なし ...
                 elif msg_type == "vote_reset":
                     if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
                     else: room.reset_votes.add(current_player_id)
@@ -293,11 +282,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                     if room.current_turn == current_player_id:
                         room.skip_votes.clear()
                         await broadcast_room_state()
-                elif msg_type == "drag_move":
-                    if room.current_turn == current_player_id:
-                        await room.broadcast_exclude({ "type": "remote_drag", "player_id": current_player_id, "shape_idx": message["shape_idx"], "row": message["row"], "col": message["col"] }, websocket)
-                elif msg_type == "drag_end":
-                    await room.broadcast_exclude({ "type": "remote_drag_end", "player_id": current_player_id }, websocket)
 
             except Exception:
                 traceback.print_exc()

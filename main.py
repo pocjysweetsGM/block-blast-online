@@ -47,6 +47,15 @@ class GameRoom:
                 await connection.send_json(message)
             except:
                 pass
+    
+    # ★追加: 自分以外に送る（ゴースト表示用）
+    async def broadcast_exclude(self, message: dict, exclude_ws: WebSocket):
+        for connection in list(self.active_connections.keys()):
+            if connection != exclude_ws:
+                try:
+                    await connection.send_json(message)
+                except:
+                    pass
 
     def rotate_turn(self):
         self.skip_votes.clear()
@@ -206,6 +215,25 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         if target_ws:
                             await target_ws.send_json({"type": "error", "message": "KICKED"})
                             await target_ws.close()
+
+                # ★追加: ドラッグ中の情報を他プレイヤーに中継
+                elif msg_type == "drag_move":
+                    # 自分のターンじゃなければ無視
+                    if room.current_turn == current_player_id:
+                        await room.broadcast_exclude({
+                            "type": "remote_drag",
+                            "player_id": current_player_id,
+                            "shape_idx": message["shape_idx"],
+                            "row": message["row"],
+                            "col": message["col"]
+                        }, websocket)
+                
+                # ★追加: ドラッグ終了（ドロップまたはキャンセル）を中継
+                elif msg_type == "drag_end":
+                    await room.broadcast_exclude({
+                        "type": "remote_drag_end",
+                        "player_id": current_player_id
+                    }, websocket)
 
                 elif msg_type == "batch_update":
                     if room.current_turn != current_player_id: continue

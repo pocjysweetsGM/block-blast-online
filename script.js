@@ -4,7 +4,6 @@ const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
 const HAND_CELL_SIZE = 30;
 const BOARD_SIZE = 8;
-// ★手札の位置をさらに上に (430 -> 415)
 const HAND_START_Y = 415; 
 const DRAG_OFFSET_Y = 80; 
 
@@ -51,6 +50,8 @@ let currentSkipVotes = [];
 let currentResetVotes = [];
 let totalPlayers = 0;
 let timerInterval = null;
+let voteNotificationTimer = null; // ★ポップアップ消去用タイマー
+let prevSkipVotesLen = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -175,7 +176,7 @@ function startGame() {
             updateTurnDisplay(data.ranking);
             updateRanking(data.ranking);
             updateButtons();
-            updateVotePopup();
+            updateVotePopup(); // ★ここでポップアップ制御
             if (currentTurnId === myPlayerId) {
                 if (currentHand.every(s => s === null)) refillHand();
                 if (!checkCanPlace()) triggerAutoPass();
@@ -222,19 +223,35 @@ function updateButtons() {
         }
     }
 }
+
+// ★修正: 投票ポップアップ制御 (1秒だけ表示)
 function updateVotePopup() {
     const popup = document.getElementById('vote-status-popup');
     const countDisplay = document.getElementById('vote-count-display');
     const vetoBtn = document.getElementById('veto-btn');
     const required = Math.max(1, totalPlayers - 1);
+
     if (currentSkipVotes.length > 0) {
-        popup.classList.add('active');
-        countDisplay.innerText = `${currentSkipVotes.length} / ${required}`;
-        if (currentTurnId === myPlayerId) vetoBtn.style.display = 'block'; else vetoBtn.style.display = 'none';
+        // 数が変わった時だけ表示を更新＆タイマーセット
+        if (currentSkipVotes.length !== prevSkipVotesLen) {
+            popup.classList.add('active');
+            countDisplay.innerText = `${currentSkipVotes.length} / ${required}`;
+            
+            if (currentTurnId === myPlayerId) vetoBtn.style.display = 'block';
+            else vetoBtn.style.display = 'none';
+
+            // 1秒後に消すタイマーをセット（既存ならリセット）
+            if (voteNotificationTimer) clearTimeout(voteNotificationTimer);
+            voteNotificationTimer = setTimeout(() => {
+                popup.classList.remove('active');
+            }, 1000);
+        }
     } else {
         popup.classList.remove('active');
     }
+    prevSkipVotesLen = currentSkipVotes.length;
 }
+
 window.voteReset = function() { ws.send(JSON.stringify({type: 'vote_reset'})); };
 window.voteSkip = function() { ws.send(JSON.stringify({type: 'vote_skip'})); };
 window.vetoSkip = function() { ws.send(JSON.stringify({type: 'veto_skip'})); };
@@ -259,10 +276,8 @@ function updateRanking(rankingData) {
         const isMe = (player.id === myPlayerId); const isTurn = (player.id === currentTurnId); 
         let text = player.name.toUpperCase(); if(player.id === hostId) text = "👑 " + text;
         const li = document.createElement('li'); 
-        // ★自分の行をハイライトするクラス
         let className = ""; if (isMe) className += "highlight-me "; if (isTurn) className += "turn-active "; 
-        li.className = className; 
-        li.innerHTML = `<span>${text}</span> <span>${player.score}</span>`; list.appendChild(li); 
+        li.className = className; li.innerHTML = `<span>${text}</span> <span>${player.score}</span>`; list.appendChild(li); 
         const fullLi = li.cloneNode(true); 
         if (myPlayerId === hostId && player.id !== myPlayerId) { const kickBtn = document.createElement('button'); kickBtn.className = 'kick-btn'; kickBtn.innerText = 'KICK'; kickBtn.onclick = (e) => { e.stopPropagation(); kickPlayer(player.id); }; fullLi.appendChild(kickBtn); } fullList.appendChild(fullLi); 
     }); 

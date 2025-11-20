@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-# ★重要: サーバー上のファイルの場所を正確に取得する
+# サーバー上のファイルパスを正しく取得
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.get("/")
@@ -42,6 +42,7 @@ class GameRoom:
         self.reset_votes: set[int] = set()
 
     async def broadcast(self, message: dict):
+        # 安全対策: リストをコピーしてから回すことで、送信中に切断されてもエラーを防ぐ
         for connection in list(self.active_connections.keys()):
             try:
                 await connection.send_json(message)
@@ -175,11 +176,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
             if message["type"] == "start_game":
                 if current_player_id == room.host_id:
-                    # ★修正: 値が変でも 0 (無制限) にしてサーバーを落とさない
+                    # ★安全対策: 数値変換エラー回避
                     try:
-                        room.max_turns = int(message.get("max_turns", 0))
+                        val = message.get("max_turns", 0)
+                        if val == "": val = 0
+                        room.max_turns = int(val)
                     except ValueError:
                         room.max_turns = 0
+                    
                     room.current_turn_count = 1
                     room.is_playing = True
                     room.current_turn = room.host_id
@@ -190,7 +194,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                 if current_player_id == room.host_id:
                     target_id = message.get("target_id")
                     target_ws = None
-                    for ws, pid in room.active_connections.items():
+                    # ★安全対策: 辞書操作中のエラー回避のために list() で囲む
+                    for ws, pid in list(room.active_connections.items()):
                         if pid == target_id:
                             target_ws = ws
                             break

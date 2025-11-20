@@ -4,6 +4,7 @@ import json
 import asyncio
 import time
 import os
+import traceback # エラー詳細表示用
 
 app = FastAPI()
 
@@ -31,8 +32,6 @@ class GameRoom:
         self.current_turn: int = 0
         self.host_id: int = 0
         self.is_playing: bool = False
-        
-        # ★変更: ターン数ではなく「総ターン数」をカウントしてラウンドを計算
         self.total_turns_taken: int = 0
         self.MAX_ROUNDS: int = 100
 
@@ -50,7 +49,7 @@ class GameRoom:
     def rotate_turn(self):
         self.skip_votes.clear()
         self.turn_start_time = time.time()
-        self.total_turns_taken += 1 # 総ターン数を加算
+        self.total_turns_taken += 1
         
         if not self.active_connections:
             self.current_turn = 0
@@ -73,8 +72,10 @@ MAX_PLAYERS_PER_ROOM = 10
 
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str = ""):
+    # --- 接続処理 ---
     if room_id not in rooms:
         rooms[room_id] = GameRoom()
+        print(f"[DEBUG] Room created: {room_id}")
     room = rooms[room_id]
 
     if len(room.active_connections) >= MAX_PLAYERS_PER_ROOM:
@@ -101,6 +102,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     else:
         final_name = nickname.strip()
     
+    # 名前重複回避
     existing_names = set(room.names.values())
     original_name = final_name
     count = 2
@@ -114,6 +116,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
     if len(room.active_connections) == 1 or room.host_id == 0:
         room.host_id = current_player_id
+        print(f"[DEBUG] New Host assigned: {final_name} (ID: {current_player_id})")
+
+    print(f"[DEBUG] {final_name} connected to {room_id}")
 
     await websocket.send_json({
         "type": "welcome",
@@ -132,7 +137,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             ranking.append({"id": pid, "name": name, "score": score})
         ranking.sort(key=lambda x: x["score"], reverse=True)
 
-        # ★変更: 現在のラウンド数を計算 ( (総ターン / 人数) + 1 )
         player_count = len(room.active_connections)
         current_round = 1
         if player_count > 0:
@@ -148,7 +152,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             "reset_votes": list(room.reset_votes),
             "host_id": room.host_id,
             "is_playing": room.is_playing,
-            "round_info": f"{current_round}/{room.MAX_ROUNDS}" # ラウンド情報を送信
+            "round_info": f"{current_round}/{room.MAX_ROUNDS}"
         }
         await room.broadcast(message)
 
@@ -159,115 +163,130 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         if player_count == 0: return
 
         if len(room.reset_votes) >= player_count:
+            print("[DEBUG] Reset vote passed")
             room.board = [[0] * 8 for _ in range(8)]
             for pid in room.scores: room.scores[pid] = 0
             room.reset_votes.clear()
             room.skip_votes.clear()
-            room.total_turns_taken = 0 # リセット時はラウンドも最初から
+            room.total_turns_taken = 0
             await room.broadcast({"type": "init", "board": room.board})
             await broadcast_room_state()
             return
 
         required_skips = max(1, player_count - 1)
         if len(room.skip_votes) >= required_skips:
+            print("[DEBUG] Skip vote passed")
             room.rotate_turn()
             await broadcast_room_state()
 
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
+            # print(f"[DEBUG] Received Raw Data: {data}") # 通信量が多すぎる場合はコメントアウト
 
-            # ■ ゲーム開始 (ターン指定なし)
-            if message["type"] == "start_game":
-                if current_player_id == room.host_id:
-                    room.total_turns_taken = 0
-                    room.is_playing = True
-                    room.current_turn = room.host_id
-                    room.turn_start_time = time.time()
-                    await broadcast_room_state()
+            # ★★★ここから: 絶対にサーバーを落とさないための防御ブロック★★★
+            try:
+                message = json.loads(data)
+                msg_type = message.get("type")
 
-            elif message["type"] == "kick_player":
-                if current_player_id == room.host_id:
-                    target_id = message.get("target_id")
-                    target_ws = None
-                    for ws, pid in list(room.active_connections.items()):
-                        if pid == target_id:
-                            target_ws = ws
-                            break
-                    if target_ws:
-                        await target_ws.send_json({"type": "error", "message": "ホストによりキックされました"})
-                        await target_ws.close() 
-
-            elif message["type"] == "batch_update":
-                if room.current_turn != current_player_id: continue
-
-                updates = message["updates"]
-                for item in updates:
-                    r, c, v = item["row"], item["col"], item["value"]
-                    if 0 <= r < 8 and 0 <= c < 8:
-                        room.board[r][c] = v
-                
-                await room.broadcast(message)
-
-                rows_to_clear = []
-                cols_to_clear = []
-                for r in range(8):
-                    if all(room.board[r][c] == 1 for c in range(8)): rows_to_clear.append(r)
-                for c in range(8):
-                    if all(room.board[r][c] == 1 for r in range(8)): cols_to_clear.append(c)
-
-                if rows_to_clear or cols_to_clear:
-                    lines_count = len(rows_to_clear) + len(cols_to_clear)
-                    points = lines_count * 10
-                    if current_player_id in room.scores:
-                        room.scores[current_player_id] += points
-                    
-                    await asyncio.sleep(0.3)
-                    cleared_updates = []
-                    for r in rows_to_clear:
-                        for c in range(8):
-                            room.board[r][c] = 0
-                            cleared_updates.append({"row": r, "col": c, "value": 0})
-                    for c in cols_to_clear:
-                        for r in range(8):
-                            room.board[r][c] = 0
-                            cleared_updates.append({"row": r, "col": c, "value": 0})
-                    
-                    await room.broadcast({"type": "batch_update", "updates": cleared_updates})
-                    await broadcast_room_state()
-
-            # ■ ターン終了 / パス時の処理
-            elif message["type"] == "end_turn" or message["type"] == "pass_turn":
-                if room.current_turn == current_player_id:
-                    # 現在のラウンドを計算
-                    player_count = len(room.active_connections)
-                    current_round = (room.total_turns_taken // player_count) + 1
-                    
-                    # 100ラウンドを超えたら終了
-                    if current_round > room.MAX_ROUNDS:
-                        room.is_playing = False
-                        await room.broadcast({"type": "game_over", "ranking": []})
-                        room.current_turn = 0
+                if msg_type == "start_game":
+                    print(f"[DEBUG] Start Game requested by ID: {current_player_id}")
+                    if current_player_id == room.host_id:
+                        print("[DEBUG] Host verified. Starting game...")
                         room.total_turns_taken = 0
+                        room.is_playing = True
+                        room.current_turn = room.host_id
+                        room.turn_start_time = time.time()
+                        await broadcast_room_state()
                     else:
-                        room.rotate_turn()
+                        print(f"[DEBUG] Start ignored. Not host. (Host is {room.host_id})")
+
+                elif msg_type == "kick_player":
+                    if current_player_id == room.host_id:
+                        target_id = message.get("target_id")
+                        print(f"[DEBUG] Kick requested for ID: {target_id}")
+                        target_ws = None
+                        for ws, pid in list(room.active_connections.items()):
+                            if pid == target_id:
+                                target_ws = ws
+                                break
+                        if target_ws:
+                            await target_ws.send_json({"type": "error", "message": "ホストによりキックされました"})
+                            await target_ws.close() 
+
+                elif msg_type == "batch_update":
+                    if room.current_turn != current_player_id: continue
+
+                    updates = message["updates"]
+                    for item in updates:
+                        r, c, v = item["row"], item["col"], item["value"]
+                        if 0 <= r < 8 and 0 <= c < 8:
+                            room.board[r][c] = v
+                    
+                    await room.broadcast(message)
+
+                    rows_to_clear = []
+                    cols_to_clear = []
+                    for r in range(8):
+                        if all(room.board[r][c] == 1 for c in range(8)): rows_to_clear.append(r)
+                    for c in range(8):
+                        if all(room.board[r][c] == 1 for r in range(8)): cols_to_clear.append(c)
+
+                    if rows_to_clear or cols_to_clear:
+                        lines_count = len(rows_to_clear) + len(cols_to_clear)
+                        points = lines_count * 10
+                        if current_player_id in room.scores:
+                            room.scores[current_player_id] += points
+                        
+                        await asyncio.sleep(0.3)
+                        cleared_updates = []
+                        for r in rows_to_clear:
+                            for c in range(8):
+                                room.board[r][c] = 0
+                                cleared_updates.append({"row": r, "col": c, "value": 0})
+                        for c in cols_to_clear:
+                            for r in range(8):
+                                room.board[r][c] = 0
+                                cleared_updates.append({"row": r, "col": c, "value": 0})
+                        
+                        await room.broadcast({"type": "batch_update", "updates": cleared_updates})
                         await broadcast_room_state()
 
-            elif message["type"] == "vote_reset":
-                if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
-                else: room.reset_votes.add(current_player_id)
-                await broadcast_room_state()
-                await check_votes_and_execute()
+                elif msg_type == "end_turn" or msg_type == "pass_turn":
+                    if room.current_turn == current_player_id:
+                        player_count = len(room.active_connections)
+                        current_round = (room.total_turns_taken // player_count) + 1
+                        
+                        if current_round > room.MAX_ROUNDS:
+                            print("[DEBUG] Max rounds reached. Game Over.")
+                            room.is_playing = False
+                            await room.broadcast({"type": "game_over", "ranking": []})
+                            room.current_turn = 0
+                            room.total_turns_taken = 0
+                        else:
+                            room.rotate_turn()
+                            await broadcast_room_state()
 
-            elif message["type"] == "vote_skip":
-                if room.current_turn != current_player_id:
-                    if current_player_id in room.skip_votes: room.skip_votes.remove(current_player_id)
-                    else: room.skip_votes.add(current_player_id)
+                elif msg_type == "vote_reset":
+                    if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
+                    else: room.reset_votes.add(current_player_id)
                     await broadcast_room_state()
                     await check_votes_and_execute()
 
+                elif msg_type == "vote_skip":
+                    if room.current_turn != current_player_id:
+                        if current_player_id in room.skip_votes: room.skip_votes.remove(current_player_id)
+                        else: room.skip_votes.add(current_player_id)
+                        await broadcast_room_state()
+                        await check_votes_and_execute()
+            
+            except Exception as e:
+                # ★エラーが起きてもここでキャッチし、サーバーダウンを防ぐ
+                print(f"[ERROR] Error processing message from {current_player_id}: {e}")
+                traceback.print_exc() # エラー詳細をログに出す
+
     except WebSocketDisconnect:
+        print(f"[DEBUG] Disconnect: {current_player_id}")
         if websocket in room.active_connections:
             del room.active_connections[websocket]
         if current_player_id in room.scores:
@@ -282,6 +301,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             if room.active_connections:
                 new_host = sorted(room.active_connections.values())[0]
                 room.host_id = new_host
+                print(f"[DEBUG] Host migrated to ID: {new_host}")
             else:
                 room.host_id = 0
 
@@ -290,6 +310,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
         if len(room.active_connections) == 0:
             del rooms[room_id]
+            print(f"[DEBUG] Room {room_id} deleted (empty)")
         else:
             await broadcast_room_state()
             await check_votes_and_execute()

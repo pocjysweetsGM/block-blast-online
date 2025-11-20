@@ -12,25 +12,12 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/icon?family=Material+Icons"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="custom-modal" class="modal-overlay" style="display: none">
-      <div class="modal-content card-panel">
-        <h2 id="modal-title">CONFIRM</h2>
-        <p id="modal-message">Message here</p>
-        <div class="modal-buttons">
-          <button
-            id="modal-cancel-btn"
-            class="start-btn"
-            style="background: #7f8c8d; margin-right: 10px"
-          >
-            CANCEL
-          </button>
-          <button id="modal-ok-btn" class="start-btn">OK</button>
-        </div>
-      </div>
-    </div>
-
     <div id="title-screen">
       <h1>BLOCK BLAST ONLINE</h1>
       <div class="card-panel input-group">
@@ -63,12 +50,50 @@
 
       <div id="ui-header">
         <div class="info-panel">
-          <div id="room-info">Room: -</div>
+          <div class="info-row">
+            <div id="room-info">Room: -</div>
+            <div id="online-count">Online: -</div>
+          </div>
           <div id="player-badge">Connecting...</div>
-          <div id="turn-indicator">Waiting...</div>
+
+          <div class="turn-control-row">
+            <div id="turn-indicator">Waiting...</div>
+
+            <div id="header-buttons">
+              <button
+                id="self-skip-btn"
+                class="icon-btn"
+                onclick="manualPass()"
+                title="Skip Turn"
+              >
+                <span class="material-icons">skip_next</span>
+              </button>
+              <button
+                id="vote-skip-btn"
+                class="icon-btn"
+                onclick="voteSkip()"
+                style="display: none"
+                title="Force Skip"
+              >
+                <span class="material-icons">gavel</span>
+              </button>
+              <button
+                id="reset-btn"
+                class="icon-btn"
+                onclick="voteReset()"
+                title="Reset Game"
+              >
+                <span class="material-icons">refresh</span>
+              </button>
+              <button class="icon-btn exit" onclick="exitGame()" title="Exit">
+                <span class="material-icons">logout</span>
+              </button>
+            </div>
+          </div>
+
           <div id="turn-count-info">Round: -/100</div>
-          <div id="online-count">Online: -</div>
         </div>
+
         <div id="leaderboard" class="card-panel">
           <h3>RANKING</h3>
           <ul id="score-list">
@@ -80,31 +105,22 @@
       <div id="canvas-wrapper">
         <canvas id="gameCanvas" width="400" height="600"></canvas>
       </div>
+    </div>
 
-      <div class="button-group">
-        <button class="exit-btn" onclick="handleExit()">EXIT</button>
-
-        <button
-          id="self-skip-btn"
-          class="vote-btn"
-          style="background: #f39c12"
-          onclick="manualPass()"
-        >
-          SKIP MY TURN
-        </button>
-
-        <button
-          id="vote-skip-btn"
-          class="vote-btn"
-          style="display: none"
-          onclick="voteSkip()"
-        >
-          FORCE SKIP
-        </button>
-
-        <button id="reset-btn" class="vote-btn" onclick="voteReset()">
-          VOTE RESET
-        </button>
+    <div id="custom-modal" class="modal-overlay" style="display: none">
+      <div class="modal-content card-panel">
+        <h2 id="modal-title">CONFIRM</h2>
+        <p id="modal-message">Message</p>
+        <div class="modal-buttons">
+          <button
+            id="modal-cancel-btn"
+            class="start-btn"
+            style="background: #7f8c8d; margin-right: 10px"
+          >
+            CANCEL
+          </button>
+          <button id="modal-ok-btn" class="start-btn">OK</button>
+        </div>
       </div>
     </div>
 

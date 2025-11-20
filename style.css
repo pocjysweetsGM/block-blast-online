@@ -51,18 +51,24 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 
 #game-container { display: none; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; justify-content: flex-start; position: relative; }
 
-/* 投票状況ポップアップ */
+/* ★投票ポップアップ (クリックスルー対応) */
 #vote-status-popup {
     position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.85); border: 2px solid var(--accent-color);
     border-radius: 8px; padding: 10px 20px; z-index: 50;
     display: none; flex-direction: column; align-items: center;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    pointer-events: none; /* ★重要: 下のボタンを押せるようにする */
 }
 #vote-status-popup.active { display: flex; animation: fadeIn 0.3s; }
 .vote-label { font-family: 'Orbitron'; font-size: 0.9em; color: #bdc3c7; margin-bottom: 5px; }
 #vote-count-display { font-size: 1.5em; font-weight: bold; color: white; }
-#veto-btn { margin-top: 5px; background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; animation: pulseRed 1s infinite; }
+#veto-btn { 
+    margin-top: 5px; background: #e74c3c; color: white; border: none; 
+    padding: 5px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; 
+    animation: pulseRed 1s infinite;
+    pointer-events: auto; /* ★ボタンだけは押せるようにする */
+}
 @keyframes pulseRed { 0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); } 70% { box-shadow: 0 0 0 5px rgba(231, 76, 60, 0); } 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); } }
 
 #pass-overlay {
@@ -83,34 +89,30 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 .my-turn { border: 2px solid var(--accent-color); color: var(--accent-color) !important; background: rgba(241, 196, 15, 0.1) !important; animation: pulse 2s infinite; }
 
 /* アイコンボタン */
-#header-buttons { display: flex; gap: 5px; }
+#header-buttons { display: flex; gap: 5px; z-index: 10; /* ポップアップよりは下だが操作可能 */ }
 .icon-btn { background: #34495e; border: none; border-radius: 6px; cursor: pointer; color: white; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; transition: transform 0.1s, background 0.2s; }
 .icon-btn:active { transform: scale(0.9); }
 .icon-btn .material-icons { font-size: 20px; }
 .icon-btn.voted { background: #2ecc71; }
-.icon-btn.exit { background: #e74c3c; }
-/* スキップボタンの特殊状態 */
-.icon-btn.self-skip { background: #f39c12; } /* 自分スキップ */
-.icon-btn.vote-wait { background: #555; opacity: 0.5; cursor: not-allowed; } /* 待機中 */
-.icon-btn.vote-active { background: #e74c3c; animation: pulseRed 2s infinite; } /* 投票可能 */
+.icon-btn.exit { background: #e74c3c; z-index: 999; /* 最優先 */ }
+.icon-btn.self-skip { background: #f39c12; }
+.icon-btn.vote-wait { background: #555; opacity: 0.5; cursor: not-allowed; }
+.icon-btn.vote-active { background: #e74c3c; animation: pulseRed 2s infinite; }
 
 #leaderboard { min-width: 120px; font-size: 0.8em; display: flex; flex-direction: column; position: relative; cursor: pointer; }
 #leaderboard h3 { margin: 0 0 5px 0; border-bottom: 2px solid var(--canvas-border); text-align: center; color: var(--accent-color); }
-#score-list { list-style: none; padding: 0; margin: 0; overflow: hidden; } /* スマホ用に一旦隠す */
+#score-list { list-style: none; padding: 0; margin: 0; overflow: hidden; }
 #score-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed var(--panel-border); padding: 3px 0; }
 #mobile-rank-hint { display: none; font-size: 0.7em; text-align: center; opacity: 0.7; margin-top: 2px; }
 
-/* スマホ用ランキング調整 */
 @media (max-width: 600px) {
     #ui-header { font-size: 0.9em; }
     h1 { font-size: 2em; }
     #leaderboard { min-width: 90px; font-size: 0.75em; max-height: 80px; }
-    /* 1位以外非表示 */
     #score-list li:nth-child(n+2) { display: none; }
     #mobile-rank-hint { display: block; }
 }
 
-/* フルランキングモーダル */
 #full-score-list { list-style: none; padding: 0; margin: 0; width: 100%; }
 #full-score-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #555; padding: 10px; font-size: 1.2em; }
 .kick-btn { background-color: #e74c3c; color: white; border: none; border-radius: 5px; padding: 2px 6px; font-size: 12px; cursor: pointer; margin-left: 10px; }

@@ -39,7 +39,6 @@ class GameRoom:
         self.skip_votes: set[int] = set()
         self.reset_votes: set[int] = set()
         
-        # ★追加: 切断したユーザーのデータを一時保存 {nickname: {'score': int, 'was_host': bool}}
         self.disconnected_data: dict[str, dict] = {}
 
     async def broadcast(self, message: dict):
@@ -92,47 +91,38 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     while current_player_id in used_ids:
         current_player_id += 1
     
-    # 名前決定（空白ならPlayer N）
     if not nickname.strip():
         final_name = f"Player {current_player_id}"
     else:
         final_name = nickname.strip()
     
-    # 重複チェック（既存プレイヤーと被る場合のみ番号付与。切断データとの照合は後述）
     existing_names = set(room.names.values())
-    # ただし、自分が再接続しようとしている名前が「切断リスト」にある場合は、番号をつけずにその名前を使いたい
-    # なので、現在のアクティブな名前とだけ重複チェックをする
     original_name = final_name
     count = 2
     while final_name in existing_names:
         final_name = f"{original_name} {count}"
         count += 1
 
-    # 登録
     room.active_connections[websocket] = current_player_id
     room.names[current_player_id] = final_name
     
-    # ★復元ロジック
     restored = False
     if final_name in room.disconnected_data:
         saved_data = room.disconnected_data[final_name]
         room.scores[current_player_id] = saved_data['score']
         if saved_data['was_host']:
-            room.host_id = current_player_id # ホスト権限返還
-        del room.disconnected_data[final_name] # データを使ったので消す
+            room.host_id = current_player_id
+        del room.disconnected_data[final_name]
         restored = True
     else:
         room.scores[current_player_id] = 0
 
-    # ホスト不在なら任命
     if len(room.active_connections) == 1 or room.host_id == 0:
         room.host_id = current_player_id
-        # もし2人目以降が入ってきてターンが0(未設定)なら設定
         if len(room.active_connections) > 1 and room.current_turn == 0:
              room.current_turn = sorted(list(room.active_connections.values()))[0]
              room.turn_start_time = time.time()
     elif len(room.active_connections) == 1:
-         # 1人目なら即時ターン開始
          room.current_turn = current_player_id
          room.turn_start_time = time.time()
 
@@ -179,14 +169,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         player_count = len(room.active_connections)
         if player_count == 0: return
 
-        # リセット (全員一致)
         if len(room.reset_votes) >= player_count:
             room.board = [[0] * 8 for _ in range(8)]
             for pid in room.scores: room.scores[pid] = 0
             room.reset_votes.clear()
             room.skip_votes.clear()
             room.total_turns_taken = 0
-            room.disconnected_data.clear() # リセット時は保存データも消す
+            room.disconnected_data.clear()
             if room.active_connections:
                 room.current_turn = sorted(list(room.active_connections.values()))[0]
                 room.turn_start_time = time.time()
@@ -194,7 +183,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             await broadcast_room_state()
             return
 
-        # スキップ (本人以外全員)
         required_skips = max(1, player_count - 1)
         if len(room.skip_votes) >= required_skips:
             room.rotate_turn()
@@ -261,7 +249,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             await room.broadcast({"type": "game_over", "ranking": []})
                             room.current_turn = 0
                             room.total_turns_taken = 0
-                            room.disconnected_data.clear() # ゲーム終了でデータ消去
+                            room.disconnected_data.clear()
                         else:
                             room.rotate_turn()
                             await broadcast_room_state()
@@ -279,10 +267,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         await broadcast_room_state()
                         await check_votes_and_execute()
                 
-                # ★追加: 拒否権 (VETO)
                 elif msg_type == "veto_skip":
                     if room.current_turn == current_player_id:
-                        room.skip_votes.clear() # 投票をリセット
+                        room.skip_votes.clear()
                         await broadcast_room_state()
 
             except Exception:
@@ -290,12 +277,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
     except WebSocketDisconnect:
         if websocket in room.active_connections:
-            # ★切断時にデータを保存
             room.disconnected_data[final_name] = {
                 'score': room.scores.get(current_player_id, 0),
                 'was_host': (room.host_id == current_player_id)
             }
-            
             del room.active_connections[websocket]
         
         if current_player_id in room.scores: del room.scores[current_player_id]
@@ -304,7 +289,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         if current_player_id in room.skip_votes: room.skip_votes.remove(current_player_id)
         if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
 
-        # ホスト移譲 (保存されているが、現行プレイのために代理を立てる)
         if room.host_id == current_player_id:
             if room.active_connections:
                 new_host = sorted(room.active_connections.values())[0]

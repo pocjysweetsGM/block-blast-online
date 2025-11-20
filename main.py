@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse
 import json
 import asyncio
@@ -10,8 +10,9 @@ app = FastAPI()
 # サーバー上のファイルパスを正しく取得
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-@app.get("/")
-async def get():
+# ★修正: Renderのヘルスチェック(HEAD)に対応させる
+@app.api_route("/", methods=["GET", "HEAD"])
+async def get(request: Request = None):
     return FileResponse(os.path.join(BASE_DIR, 'index.html'))
 
 @app.get("/style.css")
@@ -42,7 +43,7 @@ class GameRoom:
         self.reset_votes: set[int] = set()
 
     async def broadcast(self, message: dict):
-        # 安全対策: リストをコピーしてから回すことで、送信中に切断されてもエラーを防ぐ
+        # 安全対策: リストをコピーしてから回す
         for connection in list(self.active_connections.keys()):
             try:
                 await connection.send_json(message)
@@ -176,7 +177,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
             if message["type"] == "start_game":
                 if current_player_id == room.host_id:
-                    # ★安全対策: 数値変換エラー回避
                     try:
                         val = message.get("max_turns", 0)
                         if val == "": val = 0
@@ -194,7 +194,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                 if current_player_id == room.host_id:
                     target_id = message.get("target_id")
                     target_ws = None
-                    # ★安全対策: 辞書操作中のエラー回避のために list() で囲む
                     for ws, pid in list(room.active_connections.items()):
                         if pid == target_id:
                             target_ws = ws

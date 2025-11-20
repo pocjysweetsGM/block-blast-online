@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Block Blast Online</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="title-screen">
+      <h1>BLOCK BLAST ONLINE</h1>
+      <div class="card-panel input-group">
+        <input
+          type="text"
+          id="roomInput"
+          placeholder="Room ID"
+          maxlength="10"
+        />
+        <input
+          type="text"
+          id="nameInput"
+          placeholder="Nickname"
+          maxlength="10"
+        />
+        <div class="theme-switch-wrapper">
+          <label class="theme-switch" for="checkbox">
+            <input type="checkbox" id="checkbox" onchange="toggleTheme(this)" />
+            <div class="slider round"></div>
+          </label>
+          <span id="mode-label">Dark Mode</span>
+        </div>
+        <button class="start-btn" onclick="joinLobby()">ENTER LOBBY</button>
+        <p id="error-msg"></p>
+      </div>
+    </div>
+
+    <div id="lobby-screen" style="display: none">
+      <h1>LOBBY</h1>
+      <div class="card-panel">
+        <h2 id="lobby-room-name">Room: -</h2>
+        <div id="lobby-status">Waiting for host...</div>
+
+        <div id="host-controls" style="display: none">
+          <label>Max Turns (0 = Infinite):</label>
+          <input
+            type="number"
+            id="maxTurnsInput"
+            value="0"
+            min="0"
+            max="100"
+            style="width: 80px"
+          />
+          <button class="start-btn" onclick="requestStartGame()">
+            START GAME
+          </button>
+        </div>
+
+        <h3>Players</h3>
+        <ul id="lobby-player-list"></ul>
+      </div>
+    </div>
+
+    <div id="game-container">
+      <div id="pass-overlay">NO MOVES...<br />PASS</div>
+
+      <div id="ui-header">
+        <div class="info-panel">
+          <div id="room-info">Room: -</div>
+          <div id="player-badge">Connecting...</div>
+          <div id="turn-indicator">Waiting...</div>
+          <div id="turn-count-info">Turns: -/-</div>
+          <div id="online-count">Online: -</div>
+        </div>
+        <div id="leaderboard" class="card-panel">
+          <h3>RANKING</h3>
+          <ul id="score-list">
+            <li>Wait...</li>
+          </ul>
+        </div>
+      </div>
+
+      <div id="canvas-wrapper">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+      </div>
+
+      <div class="button-group">
+        <button class="exit-btn" onclick="exitGame()">EXIT</button>
+        <button
+          id="self-skip-btn"
+          class="vote-btn"
+          style="background: #f39c12"
+          onclick="manualPass()"
+        >
+          SKIP MY TURN
+        </button>
+        <button
+          id="vote-skip-btn"
+          class="vote-btn"
+          style="display: none"
+          onclick="voteSkip()"
+        >
+          FORCE SKIP
+        </button>
+        <button id="reset-btn" class="vote-btn" onclick="voteReset()">
+          VOTE RESET
+        </button>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

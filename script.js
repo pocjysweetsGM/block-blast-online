@@ -36,9 +36,10 @@ let board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
 let currentHand = [];
 let draggingIdx = -1;
 let dragX = 0, dragY = 0;
-
 let myPlayerId = null;
+let hostId = 0;
 let currentTurnId = 0;
+let isPlaying = false;
 let playerNames = {};
 let ws = null;
 let particles = [];
@@ -47,6 +48,34 @@ let currentSkipVotes = [];
 let currentResetVotes = [];
 let totalPlayers = 0;
 let timerInterval = null;
+
+// --- カスタムモーダル ---
+function showModal(title, message, onConfirm, isConfirm = false) {
+    const modal = document.getElementById('custom-modal');
+    document.getElementById('modal-title').innerText = title;
+    document.getElementById('modal-message').innerText = message;
+    
+    const okBtn = document.getElementById('modal-ok-btn');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+
+    cancelBtn.style.display = isConfirm ? 'inline-block' : 'none';
+
+    // イベントリスナーのリセット (cloneNodeハック)
+    const newOk = okBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(newOk, okBtn);
+    const newCancel = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+    newOk.addEventListener('click', () => {
+        modal.style.display = 'none';
+        if (onConfirm) onConfirm();
+    });
+    newCancel.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+
+    modal.style.display = 'flex';
+}
 
 function refillHand() {
     currentHand = [
@@ -108,7 +137,6 @@ function startGame() {
     ws = new WebSocket(url);
 
     ws.onopen = function() {
-        // 接続したら即ゲーム画面へ
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
@@ -120,7 +148,9 @@ function startGame() {
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
 
-        if (data.type === "error") { alert(data.message); location.reload(); }
+        if (data.type === "error") { 
+            showModal("ERROR", data.message, () => location.reload());
+        }
         else if (data.type === "welcome") {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
@@ -152,19 +182,20 @@ function startGame() {
         }
         else if (data.type === "init") updateBoard(data.board);
         else if (data.type === "game_over") {
-            alert("GAME OVER! 100 Rounds Completed.");
-            location.reload();
+            showModal("GAME OVER", "100 Rounds Completed!", () => location.reload());
         }
     };
     ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
 
+// 手動スキップ (確認モーダル付き)
 function manualPass() {
-    if(confirm("Skip your turn?")) {
+    showModal("SKIP TURN", "本当にスキップしますか？\n手持ちのブロックはリセットされます。", () => {
         currentHand = [null, null, null];
         ws.send(JSON.stringify({type: 'pass_turn'}));
-    }
+    }, true);
 }
+
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000;
@@ -173,6 +204,7 @@ function checkTurnTimer() {
     if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) skipBtn.style.display = 'block';
     else skipBtn.style.display = 'none';
 }
+
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     const resetCount = currentResetVotes.length;
@@ -192,7 +224,12 @@ function updateButtons() {
 
 window.voteReset = function() { ws.send(JSON.stringify({type: 'vote_reset'})); };
 window.voteSkip = function() { ws.send(JSON.stringify({type: 'vote_skip'})); };
-window.exitGame = function() { if(confirm("退出しますか？")) { if (ws) { ws.close(); ws = null; } location.reload(); } };
+window.handleExit = function() {
+    showModal("EXIT", "退出しますか？", () => {
+        if (ws) { ws.close(); ws = null; }
+        location.reload();
+    }, true);
+};
 
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
@@ -202,9 +239,84 @@ function updateRanking(rankingData) { const list = document.getElementById('scor
 function draw() { if(document.getElementById('game-container').style.display === 'none') return; const theme = THEMES[currentTheme]; ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = theme.boardBg; ctx.fillRect(0, 0, canvas.width, 400); ctx.fillStyle = theme.handBg; ctx.fillRect(0, 400, canvas.width, 200); for (let row = 0; row < BOARD_SIZE; row++) { for (let col = 0; col < BOARD_SIZE; col++) { const x = col * CELL_SIZE; const y = row * CELL_SIZE; ctx.strokeStyle = theme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE); if (board[row][col] === 1) { ctx.fillStyle = theme.blockColor; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4); ctx.fillStyle = theme.blockGloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12); } } } ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1; drawHand(theme); for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); } requestAnimationFrame(draw); }
 function drawHand(theme) { const handStartY = 450; const handHeight = 150; const slotWidth = 400 / 3; currentHand.forEach((shape, index) => { if (shape === null) return; if (index === draggingIdx) drawShape(shape, dragX, dragY, CELL_SIZE, theme.blockColor, theme); else { const shapeW = shape[0].length * HAND_CELL_SIZE; const shapeH = shape.length * HAND_CELL_SIZE; const slotCX = (index * slotWidth) + (slotWidth / 2); const slotCY = handStartY + (handHeight / 2); const color = (currentTurnId === myPlayerId) ? theme.blockColor : theme.inactiveHand; drawShape(shape, slotCX - shapeW/2, slotCY - shapeH/2, HAND_CELL_SIZE, color, theme); } }); }
 function drawShape(shape, startX, startY, size, color, theme) { ctx.fillStyle = color; for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2); ctx.fillStyle = theme.blockGloss; ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4); ctx.fillStyle = color; } } } }
+
 function getCanvasCoordinates(event) { const rect = canvas.getBoundingClientRect(); let clientX, clientY; if (event.touches && event.touches.length > 0) { clientX = event.touches[0].clientX; clientY = event.touches[0].clientY; } else { clientX = event.clientX; clientY = event.clientY; } const scaleX = canvas.width / rect.width; const scaleY = canvas.height / rect.height; return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }; }
-function handleStart(e) { if (currentTurnId !== myPlayerId) return; if(e.type === 'touchstart') e.preventDefault(); const pos = getCanvasCoordinates(e); if (pos.y > 400) { const slotWidth = 400 / 3; const clickedSlotIndex = Math.floor(pos.x / slotWidth); if (clickedSlotIndex >= 0 && clickedSlotIndex < 3) { const shape = currentHand[clickedSlotIndex]; if (shape !== null) { draggingIdx = clickedSlotIndex; dragX = pos.x - (shape[0].length * CELL_SIZE) / 2; dragY = pos.y - (shape.length * CELL_SIZE) / 2; } } } }
-function handleMove(e) { if (draggingIdx !== -1) { if(e.type === 'touchmove') e.preventDefault(); const pos = getCanvasCoordinates(e); const shape = currentHand[draggingIdx]; dragX = pos.x - (shape[0].length * CELL_SIZE) / 2; dragY = pos.y - (shape.length * CELL_SIZE) / 2; } }
-function handleEnd(e) { if (draggingIdx !== -1) { if(e.type === 'touchend') e.preventDefault(); const shape = currentHand[draggingIdx]; const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE); let canPlace = true; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false; else if (board[placeRow + r][placeCol + c] === 1) canPlace = false; } if (placeRow + shape.length > BOARD_SIZE || placeCol + shape[0].length > BOARD_SIZE) canPlace = false; } } if (canPlace) { const updates = []; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1}); } } } ws.send(JSON.stringify({type: 'batch_update', updates: updates})); currentHand[draggingIdx] = null; if (currentHand.every(s => s === null)) { refillHand(); ws.send(JSON.stringify({type: 'end_turn'})); } else { if (!checkCanPlace()) { triggerAutoPass(); } } } draggingIdx = -1; } }
+
+function handleStart(e) {
+    if (currentTurnId !== myPlayerId) return;
+    if(e.type === 'touchstart') e.preventDefault();
+    const pos = getCanvasCoordinates(e);
+    if (pos.y > 400) {
+        const slotWidth = 400 / 3; const clickedSlotIndex = Math.floor(pos.x / slotWidth);
+        if (clickedSlotIndex >= 0 && clickedSlotIndex < 3) {
+            const shape = currentHand[clickedSlotIndex];
+            if (shape !== null) { 
+                draggingIdx = clickedSlotIndex;
+                // ★指の上にブロックを表示するオフセット計算
+                const blockPixelWidth = shape[0].length * CELL_SIZE;
+                const blockPixelHeight = shape.length * CELL_SIZE;
+                
+                // 中心X: 指の位置 - ブロック幅の半分
+                dragX = pos.x - (blockPixelWidth / 2);
+                
+                // 中心Y: 指の位置 - ブロックの高さ - 余白 (これで指の上に浮く)
+                dragY = pos.y - blockPixelHeight - 40; 
+            }
+        }
+    }
+}
+function handleMove(e) {
+    if (draggingIdx !== -1) {
+        if(e.type === 'touchmove') e.preventDefault();
+        const pos = getCanvasCoordinates(e);
+        const shape = currentHand[draggingIdx];
+        
+        const blockPixelWidth = shape[0].length * CELL_SIZE;
+        const blockPixelHeight = shape.length * CELL_SIZE;
+        
+        // 移動中も指の上に表示
+        dragX = pos.x - (blockPixelWidth / 2);
+        dragY = pos.y - blockPixelHeight - 40;
+    }
+}
+function handleEnd(e) {
+    if (draggingIdx !== -1) {
+        if(e.type === 'touchend') e.preventDefault();
+        const shape = currentHand[draggingIdx];
+        // 吸着判定は「ブロックの中心」で行うと自然
+        // ブロックの中心座標 = 左上(dragX, dragY) + 半分サイズ
+        const centerX = dragX + (shape[0].length * CELL_SIZE) / 2;
+        const centerY = dragY + (shape.length * CELL_SIZE) / 2;
+        
+        const placeCol = Math.floor(centerX / CELL_SIZE);
+        const placeRow = Math.floor(centerY / CELL_SIZE);
+        
+        let canPlace = true;
+        for(let r=0; r<shape.length; r++) {
+            for(let c=0; c<shape[r].length; c++) {
+                if(shape[r][c] === 1) {
+                    if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false;
+                    else if (board[placeRow + r][placeCol + c] === 1) canPlace = false;
+                }
+            }
+        }
+        if (canPlace) {
+            const updates = [];
+            for(let r=0; r<shape.length; r++) {
+                for(let c=0; c<shape[r].length; c++) {
+                    if(shape[r][c] === 1) {
+                        const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1});
+                    }
+                }
+            }
+            ws.send(JSON.stringify({type: 'batch_update', updates: updates}));
+            currentHand[draggingIdx] = null;
+            if (currentHand.every(s => s === null)) { refillHand(); ws.send(JSON.stringify({type: 'end_turn'})); }
+            else { if (!checkCanPlace()) { triggerAutoPass(); } }
+        }
+        draggingIdx = -1;
+    }
+}
+
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd);
 canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});

@@ -103,11 +103,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     room.scores[current_player_id] = 0
     room.names[current_player_id] = final_name
 
-    # 最初の1人ならその人のターンにする（即ゲーム開始）
     if len(room.active_connections) == 1:
         room.current_turn = current_player_id
         room.turn_start_time = time.time()
-    # 2人目以降が入ってきたとき、もし誰もターンを持っていない状態なら（バグ防止）、最初のIDに渡す
     elif room.current_turn == 0:
         room.current_turn = sorted(list(room.active_connections.values()))[0]
         room.turn_start_time = time.time()
@@ -156,12 +154,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             room.reset_votes.clear()
             room.skip_votes.clear()
             room.total_turns_taken = 0
-            
-            # ターンをリセット（最初のIDの人へ）
             if room.active_connections:
                 room.current_turn = sorted(list(room.active_connections.values()))[0]
                 room.turn_start_time = time.time()
-            
             await room.broadcast({"type": "init", "board": room.board})
             await broadcast_room_state()
             return
@@ -174,20 +169,17 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     try:
         while True:
             data = await websocket.receive_text()
-            
             try:
                 message = json.loads(data)
                 msg_type = message.get("type")
 
                 if msg_type == "batch_update":
                     if room.current_turn != current_player_id: continue
-
                     updates = message["updates"]
                     for item in updates:
                         r, c, v = item["row"], item["col"], item["value"]
                         if 0 <= r < 8 and 0 <= c < 8:
                             room.board[r][c] = v
-                    
                     await room.broadcast(message)
 
                     rows_to_clear = []
@@ -202,7 +194,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         points = lines_count * 10
                         if current_player_id in room.scores:
                             room.scores[current_player_id] += points
-                        
                         await asyncio.sleep(0.3)
                         cleared_updates = []
                         for r in rows_to_clear:
@@ -213,7 +204,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             for r in range(8):
                                 room.board[r][c] = 0
                                 cleared_updates.append({"row": r, "col": c, "value": 0})
-                        
                         await room.broadcast({"type": "batch_update", "updates": cleared_updates})
                         await broadcast_room_state()
 
@@ -221,11 +211,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                     if room.current_turn == current_player_id:
                         player_count = len(room.active_connections)
                         current_round = (room.total_turns_taken // player_count) + 1
-                        
                         if current_round > room.MAX_ROUNDS:
                             await room.broadcast({"type": "game_over", "ranking": []})
-                            # ゲームオーバー後もリセットされるまでそのまま待機、もしくは自動リセット
-                            # 今回はそのまま
                         else:
                             room.rotate_turn()
                             await broadcast_room_state()
@@ -242,7 +229,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         else: room.skip_votes.add(current_player_id)
                         await broadcast_room_state()
                         await check_votes_and_execute()
-            
             except Exception:
                 traceback.print_exc()
 

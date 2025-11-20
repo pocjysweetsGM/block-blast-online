@@ -4,7 +4,7 @@ const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
 const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
-const DRAG_OFFSET_Y = 90; // 指よりさらに上に表示
+const DRAG_OFFSET_Y = 80; 
 
 const THEMES = {
     dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
@@ -91,6 +91,7 @@ let voteNotificationTimer = null;
 let prevSkipVotesLen = 0;
 let comboCount = 0;
 let lastClearTurnId = -1;
+let lastSentTime = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -168,6 +169,22 @@ function canPlaceAfterClear(shapeToCheck) {
     return false;
 }
 
+// ★復活: checkPotentialClears (これがないとdrawでエラーになる)
+function checkPotentialClears(shape, startRow, startCol) {
+    let tempBoard = board.map(row => [...row]);
+    for(let r=0; r<shape.length; r++) {
+        for(let c=0; c<shape[r].length; c++) {
+            if(shape[r][c] === 1) {
+                tempBoard[startRow + r][startCol + c] = 1;
+            }
+        }
+    }
+    let rows = []; let cols = [];
+    for (let r = 0; r < BOARD_SIZE; r++) { if (tempBoard[r].every(cell => cell === 1)) rows.push(r); }
+    for (let c = 0; c < BOARD_SIZE; c++) { let full = true; for (let r = 0; r < BOARD_SIZE; r++) { if (tempBoard[r][c] === 0) full = false; } if (full) cols.push(c); }
+    return { rows, cols };
+}
+
 async function triggerAutoPass() {
     const overlay = document.getElementById('pass-overlay');
     overlay.classList.add('active');
@@ -178,7 +195,6 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
-// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -193,7 +209,6 @@ function startGame() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
-        // 初期化時に手札補充
         if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         draw();
         if(timerInterval) clearInterval(timerInterval);
@@ -224,7 +239,6 @@ function startGame() {
             updateButtons();
             updateVotePopup();
             
-            // 手札補充
             if (currentHand.length === 0 || currentHand.every(s => s === null)) {
                 refillHand();
             }
@@ -264,12 +278,21 @@ function manualPass() {
         ws.send(JSON.stringify({type: 'pass_turn'}));
     }, true);
 }
+
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000; const diff = now - turnStartTime;
     const skipBtn = document.getElementById('vote-skip-btn');
-    if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) { skipBtn.style.display = 'flex'; } else { skipBtn.style.display = 'none'; }
+    // ★修正: ボタンが存在するかチェック
+    if (skipBtn) {
+        if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) { 
+            skipBtn.style.display = 'flex'; 
+        } else { 
+            skipBtn.style.display = 'none'; 
+        }
+    }
 }
+
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted'); else resetBtn.classList.remove('voted');
@@ -328,7 +351,6 @@ function updateRanking(rankingData) {
     }); 
 }
 
-// --- 描画 ---
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
     const theme = THEMES[currentTheme];
@@ -386,7 +408,6 @@ function drawHand(theme) {
         const blockSize = 30 * scale;
 
         if (index === draggingIdx) {
-            // ドラッグ中は大きく表示、かつthemeを渡す
             drawShape(shape, dragX, dragY, CELL_SIZE, 'rgba(52, 152, 219, 0.7)', theme);
         } else {
             const color = (currentTurnId === myPlayerId && !isClearing) ? theme.blockColor : theme.inactiveHand;

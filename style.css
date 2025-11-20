@@ -51,14 +51,14 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 
 #game-container { display: none; flex-direction: column; align-items: center; width: 100%; height: 100%; padding: 10px; box-sizing: border-box; justify-content: flex-start; position: relative; }
 
-/* ★投票ポップアップ (クリックスルー対応) */
+/* 投票ポップアップ */
 #vote-status-popup {
     position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.85); border: 2px solid var(--accent-color);
     border-radius: 8px; padding: 10px 20px; z-index: 50;
     display: none; flex-direction: column; align-items: center;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    pointer-events: none; /* ★重要: 下のボタンを押せるようにする */
+    pointer-events: none;
 }
 #vote-status-popup.active { display: flex; animation: fadeIn 0.3s; }
 .vote-label { font-family: 'Orbitron'; font-size: 0.9em; color: #bdc3c7; margin-bottom: 5px; }
@@ -66,8 +66,7 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 #veto-btn { 
     margin-top: 5px; background: #e74c3c; color: white; border: none; 
     padding: 5px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; 
-    animation: pulseRed 1s infinite;
-    pointer-events: auto; /* ★ボタンだけは押せるようにする */
+    animation: pulseRed 1s infinite; pointer-events: auto;
 }
 @keyframes pulseRed { 0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); } 70% { box-shadow: 0 0 0 5px rgba(231, 76, 60, 0); } 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); } }
 
@@ -79,7 +78,7 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 }
 #pass-overlay.active { display: flex; opacity: 1; }
 
-#ui-header { display: flex; width: 100%; max-width: 500px; justify-content: space-between; margin-bottom: 5px; align-items: stretch; }
+#ui-header { display: flex; width: 100%; max-width: 500px; justify-content: space-between; margin-bottom: 5px; align-items: stretch; position: relative; z-index: 300; /* ★重要: EXITボタンがCanvasより上に来るように */ }
 .info-panel { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .info-row { display: flex; gap: 10px; font-size: 0.8em; opacity: 0.8; }
 #room-info, #online-count, #turn-count-info { background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: inherit; }
@@ -88,22 +87,32 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 #turn-indicator { font-size: 1em; font-weight: bold; color: white; background-color: #34495e; padding: 6px 12px; border-radius: 8px; text-align: center; text-transform: uppercase; white-space: nowrap; }
 .my-turn { border: 2px solid var(--accent-color); color: var(--accent-color) !important; background: rgba(241, 196, 15, 0.1) !important; animation: pulse 2s infinite; }
 
-/* アイコンボタン */
-#header-buttons { display: flex; gap: 5px; z-index: 10; /* ポップアップよりは下だが操作可能 */ }
+#header-buttons { display: flex; gap: 5px; z-index: 400; /* ★ボタン最優先 */ }
 .icon-btn { background: #34495e; border: none; border-radius: 6px; cursor: pointer; color: white; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; transition: transform 0.1s, background 0.2s; }
 .icon-btn:active { transform: scale(0.9); }
 .icon-btn .material-icons { font-size: 20px; }
 .icon-btn.voted { background: #2ecc71; }
-.icon-btn.exit { background: #e74c3c; z-index: 999; /* 最優先 */ }
+.icon-btn.exit { background: #e74c3c; }
 .icon-btn.self-skip { background: #f39c12; }
 .icon-btn.vote-wait { background: #555; opacity: 0.5; cursor: not-allowed; }
 .icon-btn.vote-active { background: #e74c3c; animation: pulseRed 2s infinite; }
 
-#leaderboard { min-width: 120px; font-size: 0.8em; display: flex; flex-direction: column; position: relative; cursor: pointer; }
+#leaderboard { min-width: 120px; font-size: 0.8em; display: flex; flex-direction: column; position: relative; cursor: pointer; z-index: 300;}
 #leaderboard h3 { margin: 0 0 5px 0; border-bottom: 2px solid var(--canvas-border); text-align: center; color: var(--accent-color); }
 #score-list { list-style: none; padding: 0; margin: 0; overflow: hidden; }
 #score-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed var(--panel-border); padding: 3px 0; }
 #mobile-rank-hint { display: none; font-size: 0.7em; text-align: center; opacity: 0.7; margin-top: 2px; }
+
+/* ★自分のランキング強調スタイル */
+.highlight-me { 
+    background-color: rgba(241, 196, 15, 0.2); /* 黄色の背景 */
+    border: 1px solid #f1c40f;
+    border-radius: 4px;
+    padding: 2px 5px !important;
+    color: #fff;
+    font-weight: bold;
+}
+.turn-active { color: #2ecc71; font-weight: bold; }
 
 @media (max-width: 600px) {
     #ui-header { font-size: 0.9em; }

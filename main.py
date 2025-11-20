@@ -175,7 +175,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
             if message["type"] == "start_game":
                 if current_player_id == room.host_id:
-                    room.max_turns = int(message.get("max_turns", 0))
+                    # ★修正: 値が変でも 0 (無制限) にしてサーバーを落とさない
+                    try:
+                        room.max_turns = int(message.get("max_turns", 0))
+                    except ValueError:
+                        room.max_turns = 0
                     room.current_turn_count = 1
                     room.is_playing = True
                     room.current_turn = room.host_id

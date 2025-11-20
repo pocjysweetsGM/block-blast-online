@@ -4,11 +4,11 @@ const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
 const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
-const DRAG_OFFSET_Y = 90; 
+const DRAG_OFFSET_Y = 80; 
 
 const THEMES = {
-    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)', remoteGhost: 'rgba(231, 76, 60, 0.4)' },
-    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)', remoteGhost: 'rgba(214, 48, 49, 0.4)' }
+    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
+    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 let currentTheme = 'dark';
 function toggleTheme(checkbox) {
@@ -17,173 +17,40 @@ function toggleTheme(checkbox) {
     draw();
 }
 
-// --- ★リッチ効果音マネージャー ---
+// ★音を元に戻す（シンプルな電子音）
 class SoundManager {
-    constructor() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        // ノイズバッファを事前に作っておく（風やガラス音用）
-        this.noiseBuffer = this._createNoiseBuffer();
-    }
-
-    _createNoiseBuffer() {
-        const bufferSize = this.ctx.sampleRate * 2.0; // 2秒分
+    constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    playPick() { this._tone(600, 800, 0.1); }
+    playReturn() { this._tone(300, 100, 0.2); }
+    playPlace() { this._tone(200, 50, 0.1); }
+    playClear(combo) {
+        if(this.ctx.state === 'suspended') this.ctx.resume();
+        const bufferSize = this.ctx.sampleRate * 0.5;
         const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = Math.random() * 2 - 1;
-        }
-        return buffer;
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+        const noiseFilter = this.ctx.createBiquadFilter(); noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 1000 + (combo * 500);
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+        noise.connect(noiseFilter); noiseFilter.connect(noiseGain); noiseGain.connect(this.ctx.destination);
+        noise.start();
+        const baseFreq = 440; const freq = baseFreq * Math.pow(1.05946, combo * 2);
+        this._tone(freq, freq * 2, 0.3, 'triangle');
     }
-
-    _resume() {
+    playButton() { this._tone(800, 800, 0.05, 'sine', 0.05); }
+    _tone(f1, f2, dur, type='sine', vol=0.1) {
         if(this.ctx.state === 'suspended') this.ctx.resume();
-    }
-
-    // 持ち上げ: パッ（シャボン玉）
-    playPick() {
-        this._resume();
-        const t = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        
-        osc.type = 'sine';
-        // ピッチが急激に上がる
-        osc.frequency.setValueAtTime(300, t);
-        osc.frequency.exponentialRampToValueAtTime(800, t + 0.1);
-        
-        gain.gain.setValueAtTime(0.3, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
-        
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.1);
-    }
-
-    // 戻る: シュッ（風切り音）
-    playReturn() {
-        this._resume();
-        const t = this.ctx.currentTime;
-        const src = this.ctx.createBufferSource();
-        src.buffer = this.noiseBuffer;
-        
-        const filter = this.ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        // フィルターを開いて閉じる（シュッ）
-        filter.frequency.setValueAtTime(800, t);
-        filter.frequency.exponentialRampToValueAtTime(100, t + 0.25);
-        
-        const gain = this.ctx.createGain();
-        gain.gain.setValueAtTime(0.4, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
-        
-        src.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.ctx.destination);
-        src.start(t);
-        src.stop(t + 0.3);
-    }
-
-    // 配置: カチッ（硬いパズル音）
-    playPlace() {
-        this._resume();
-        const t = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        
-        osc.type = 'square'; // 硬い音
-        osc.frequency.setValueAtTime(600, t);
-        osc.frequency.exponentialRampToValueAtTime(100, t + 0.08); // 一瞬で下がる
-        
-        gain.gain.setValueAtTime(0.2, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
-        
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.1);
-    }
-
-    // 消去: ガシャーン（ガラス/クリスタル）+ コンボで音程アップ
-    playClear(combo) {
-        this._resume();
-        const t = this.ctx.currentTime;
-
-        // 1. 衝撃音（ハイパスノイズ）
-        const src = this.ctx.createBufferSource();
-        src.buffer = this.noiseBuffer;
-        const filter = this.ctx.createBiquadFilter();
-        filter.type = 'highpass';
-        filter.frequency.value = 1500; // 低音をカットしてガラスっぽく
-        const gain = this.ctx.createGain();
-        gain.gain.setValueAtTime(0.4, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-        src.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
-        src.start(t); src.stop(t + 0.5);
-
-        // 2. 破片のキラキラ音（複数のサイン波）
-        // コンボ数に応じて基本周波数を上げる
-        const baseFreq = 880 * Math.pow(1.05946, combo * 2); // ラの音からスタート
-        const harmonics = [1, 1.5, 2.4, 3.2]; // 非整数倍音で金属感を出す
-
-        harmonics.forEach((h, i) => {
-            const osc = this.ctx.createOscillator();
-            const g = this.ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(baseFreq * h, t);
-            // ランダムに少し揺らす
-            osc.frequency.linearRampToValueAtTime(baseFreq * h + (Math.random()*100), t + 0.6);
-            
-            g.gain.setValueAtTime(0.15 / (i+1), t);
-            g.gain.exponentialRampToValueAtTime(0.001, t + 0.6 + (i*0.1)); // 余韻
-
-            osc.connect(g);
-            g.connect(this.ctx.destination);
-            osc.start(t);
-            osc.stop(t + 1.0);
-        });
-    }
-
-    // ボタン: カッ（木片）
-    playButton() {
-        this._resume();
-        const t = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        
-        osc.type = 'triangle'; // 丸みのある硬い音
-        osc.frequency.setValueAtTime(800, t);
-        osc.frequency.exponentialRampToValueAtTime(400, t + 0.05);
-        
-        gain.gain.setValueAtTime(0.2, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
-        
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.1);
-    }
-
-    // 入力フォーム: カチャ（メカニカルキーボード）
-    playType() {
-        this._resume();
-        const t = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        
-        // 2つの音を混ぜてカチャッ感を出す
-        // メインのクリック音
-        osc.type = 'sawtooth'; // 鋭い音
-        osc.frequency.setValueAtTime(2000, t);
-        osc.frequency.exponentialRampToValueAtTime(500, t + 0.03);
-        
-        gain.gain.setValueAtTime(0.1, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.03);
-        
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(t);
-        osc.stop(t + 0.05);
+        const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(f1, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(f2, this.ctx.currentTime + dur);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.start(); osc.stop(this.ctx.currentTime + dur);
     }
 }
 const sound = new SoundManager();
@@ -223,7 +90,6 @@ let totalPlayers = 0;
 let timerInterval = null;
 let voteNotificationTimer = null;
 let prevSkipVotesLen = 0;
-let remoteDrags = {};
 let comboCount = 0;
 let lastClearTurnId = -1;
 let lastSentTime = 0;
@@ -303,8 +169,7 @@ function canPlaceAfterClear(shapeToCheck) {
     for (let r = 0; r < BOARD_SIZE; r++) { for (let c = 0; c < BOARD_SIZE; c++) { if (canFit(shapeToCheck, r, c, simBoard)) return true; } }
     return false;
 }
-
-// ★復活: checkPotentialClears (これがないとdrawでエラーになる)
+// ★復活: これがないとdrawでエラーになる
 function checkPotentialClears(shape, startRow, startCol) {
     let tempBoard = board.map(row => [...row]);
     for(let r=0; r<shape.length; r++) {
@@ -330,7 +195,6 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
-// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -339,21 +203,17 @@ function startGame() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
-    
     if (ws) ws.close();
     ws = new WebSocket(url);
-
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
-        // ★初期化時にも手札を補充
         if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         draw();
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
-
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -362,13 +222,11 @@ function startGame() {
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
             updateBoard(data.board);
-            // 手札補充
             if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         }
         else if (data.type === "game_state") {
             document.getElementById('online-count').innerText = `ONLINE: ${data.count}/10`;
             totalPlayers = data.count;
-            if (currentTurnId !== data.current_turn) { remoteDrags = {}; }
             currentTurnId = data.current_turn;
             turnStartTime = data.turn_start_time;
             currentSkipVotes = data.skip_votes;
@@ -393,7 +251,7 @@ function startGame() {
             let cleared = false;
             data.updates.forEach(item => {
                 if (item.value === 0 && board[item.row][item.col] === 1) {
-                    createExplosion(item.col, item.row);
+                    createExplosion(item.col, item.row); // ★これがなくてエラーになっていた
                     cleared = true;
                 }
                 board[item.row][item.col] = item.value;
@@ -420,12 +278,10 @@ function manualPass() {
         ws.send(JSON.stringify({type: 'pass_turn'}));
     }, true);
 }
-
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000; const diff = now - turnStartTime;
     const skipBtn = document.getElementById('vote-skip-btn');
-    // ★修正: ボタンが存在するかチェック
     if (skipBtn) {
         if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) { 
             skipBtn.style.display = 'flex'; 
@@ -434,11 +290,9 @@ function checkTurnTimer() {
         }
     }
 }
-
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted'); else resetBtn.classList.remove('voted');
-
     const skipBtn = document.getElementById('action-skip-btn');
     const skipIcon = document.getElementById('skip-icon');
     if (currentTurnId === myPlayerId) {
@@ -492,6 +346,10 @@ function updateRanking(rankingData) {
         const fullLi = li.cloneNode(true); if (myPlayerId === hostId && player.id !== myPlayerId) { const kickBtn = document.createElement('button'); kickBtn.className = 'kick-btn'; kickBtn.innerText = 'KICK'; kickBtn.onclick = (e) => { e.stopPropagation(); kickPlayer(player.id); }; fullLi.appendChild(kickBtn); } fullList.appendChild(fullLi); 
     }); 
 }
+
+// ★復活: パーティクル関数
+class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
+function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
@@ -550,7 +408,6 @@ function drawHand(theme) {
         const blockSize = 30 * scale;
 
         if (index === draggingIdx) {
-            // ★修正: themeを渡す
             drawShape(shape, dragX, dragY, CELL_SIZE, 'rgba(52, 152, 219, 0.7)', theme);
         } else {
             const color = (currentTurnId === myPlayerId && !isClearing) ? theme.blockColor : theme.inactiveHand;
@@ -565,7 +422,6 @@ function drawShape(shape, startX, startY, size, color, theme) {
         for(let c = 0; c < shape[r].length; c++) {
             if(shape[r][c] === 1) {
                 ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2);
-                // ★安全策: themeがnullでもエラーにならないように
                 if (theme && theme.blockGloss) {
                     ctx.fillStyle = theme.blockGloss;
                     ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
@@ -626,18 +482,6 @@ function handleEnd(e) {
     }
 }
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
-
-// ★入力フォームの効果音追加 (id指定)
-const roomInput = document.getElementById('roomInput');
-const nameInput = document.getElementById('nameInput');
-if(roomInput) {
-    roomInput.addEventListener('click', () => sound.playType());
-    roomInput.addEventListener('input', () => sound.playType());
-}
-if(nameInput) {
-    nameInput.addEventListener('click', () => sound.playType());
-    nameInput.addEventListener('input', () => sound.playType());
-}
 
 // ★初期化時にも手札を作る
 if(currentHand.length === 0) refillHand();

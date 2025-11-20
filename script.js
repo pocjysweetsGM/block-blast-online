@@ -17,7 +17,6 @@ function toggleTheme(checkbox) {
     draw();
 }
 
-// ★音を元に戻す（シンプルな電子音）
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -169,7 +168,6 @@ function canPlaceAfterClear(shapeToCheck) {
     for (let r = 0; r < BOARD_SIZE; r++) { for (let c = 0; c < BOARD_SIZE; c++) { if (canFit(shapeToCheck, r, c, simBoard)) return true; } }
     return false;
 }
-// ★復活: これがないとdrawでエラーになる
 function checkPotentialClears(shape, startRow, startCol) {
     let tempBoard = board.map(row => [...row]);
     for(let r=0; r<shape.length; r++) {
@@ -220,9 +218,28 @@ function startGame() {
         else if (data.type === "welcome") {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
+            
+            // ★設定パネル表示 (Host かつ まだ始まってない場合)
+            const overlay = document.getElementById('setup-overlay');
+            if (!data.is_playing) {
+                overlay.style.display = 'flex';
+                if (data.host_id === myPlayerId) {
+                    document.getElementById('setup-host-controls').style.display = 'block';
+                    document.getElementById('setup-waiting-msg').style.display = 'none';
+                } else {
+                    document.getElementById('setup-host-controls').style.display = 'none';
+                    document.getElementById('setup-waiting-msg').style.display = 'block';
+                }
+            } else {
+                overlay.style.display = 'none'; // 途中参加
+            }
+
             if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
             updateBoard(data.board);
             if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
+        }
+        else if (data.type === "game_start") {
+            document.getElementById('setup-overlay').style.display = 'none';
         }
         else if (data.type === "game_state") {
             document.getElementById('online-count').innerText = `ONLINE: ${data.count}/10`;
@@ -243,15 +260,16 @@ function startGame() {
                 refillHand();
             }
             
-            if (currentTurnId === myPlayerId && !isClearing) {
+            if (currentTurnId === myPlayerId && !isClearing && isPlaying) {
                 if (!checkCanPlace()) triggerAutoPass();
             }
+            isPlaying = data.is_playing; // 更新
         }
         else if (data.type === "batch_update") {
             let cleared = false;
             data.updates.forEach(item => {
                 if (item.value === 0 && board[item.row][item.col] === 1) {
-                    createExplosion(item.col, item.row); // ★これがなくてエラーになっていた
+                    createExplosion(item.col, item.row);
                     cleared = true;
                 }
                 board[item.row][item.col] = item.value;
@@ -267,10 +285,68 @@ function startGame() {
             }
         }
         else if (data.type === "init") updateBoard(data.board);
-        else if (data.type === "game_over") showModal("GAME OVER", "100 Rounds Completed!", () => location.reload());
+        
+        // ★ゲームオーバー演出呼び出し
+        else if (data.type === "game_over") {
+            showGameOver(data.ranking);
+        }
     };
     ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
+
+// ★設定パネルからの開始
+function sendGameStart() {
+    const rounds = document.getElementById('roundsInput').value;
+    ws.send(JSON.stringify({type: 'start_game', max_rounds: rounds}));
+}
+
+// ★ゲームオーバー演出
+function showGameOver(ranking) {
+    const screen = document.getElementById('result-screen');
+    const title = document.getElementById('result-title');
+    const content = document.getElementById('result-content');
+    content.innerHTML = "";
+    screen.style.display = 'flex';
+
+    if (totalPlayers === 2) {
+        // 2人: Win/Lose
+        const myRank = ranking.findIndex(p => p.id === myPlayerId);
+        const isWin = (myRank === 0); // 1位なら勝ち
+        title.innerText = isWin ? "VICTORY" : "DEFEAT";
+        title.className = isWin ? "result-item win-state win-text" : "result-item win-state lose-text";
+        
+        // 相手のスコアも表示
+        ranking.forEach(p => {
+            const div = document.createElement('div');
+            div.className = "result-item";
+            div.innerHTML = `<span>${p.name}</span><span>${p.score}</span>`;
+            if (p.id === myPlayerId) div.style.fontWeight = "bold";
+            content.appendChild(div);
+        });
+        
+    } else {
+        // 3人以上: ランキング演出
+        title.innerText = "FINAL RANKING";
+        title.className = ""; // クラスリセット
+        
+        // 下位から順に表示 (アニメーション)
+        // 逆順にする
+        const reverseRank = [...ranking].reverse();
+        reverseRank.forEach((p, index) => {
+            setTimeout(() => {
+                const div = document.createElement('div');
+                div.className = "result-item";
+                if (p.id === ranking[0].id) div.classList.add("winner"); // 1位
+                
+                div.innerHTML = `<span>${ranking.length - index}. ${p.name}</span><span>${p.score}</span>`;
+                // 先頭に追加 (3位->2位->1位と上に追加されていく)
+                content.prepend(div);
+                sound.playPlace();
+            }, index * 800); // 0.8秒ごとに表示
+        });
+    }
+}
+
 
 function manualPass() {
     showModal("SKIP TURN", "本当にスキップしますか？", () => {
@@ -293,6 +369,7 @@ function checkTurnTimer() {
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted'); else resetBtn.classList.remove('voted');
+
     const skipBtn = document.getElementById('action-skip-btn');
     const skipIcon = document.getElementById('skip-icon');
     if (currentTurnId === myPlayerId) {
@@ -330,6 +407,7 @@ window.voteSkip = function() { sound.playButton(); ws.send(JSON.stringify({type:
 window.vetoSkip = function() { sound.playButton(); ws.send(JSON.stringify({type: 'veto_skip'})); };
 window.handleExit = function() { showModal("EXIT", "退出しますか？", () => { if (ws) { ws.close(); ws = null; } location.reload(); }, true); };
 function kickPlayer(targetId) { if(confirm("Kick this player?")) ws.send(JSON.stringify({type: 'kick_player', target_id: targetId})); }
+
 function openRankingModal() { sound.playButton(); document.getElementById('ranking-modal').style.display = 'flex'; }
 function closeRankingModal(e) { if(e === null || e.target.id === 'ranking-modal') { sound.playButton(); document.getElementById('ranking-modal').style.display = 'none'; } }
 function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }
@@ -347,7 +425,6 @@ function updateRanking(rankingData) {
     }); 
 }
 
-// ★復活: パーティクル関数
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 

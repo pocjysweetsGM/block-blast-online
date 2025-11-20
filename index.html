@@ -48,15 +48,6 @@
         <div id="lobby-status">Waiting for host...</div>
 
         <div id="host-controls" style="display: none">
-          <label>Max Turns (0 = Infinite):</label>
-          <input
-            type="number"
-            id="maxTurnsInput"
-            value="0"
-            min="0"
-            max="100"
-            style="width: 80px"
-          />
           <button class="start-btn" onclick="requestStartGame()">
             START GAME
           </button>
@@ -75,7 +66,7 @@
           <div id="room-info">Room: -</div>
           <div id="player-badge">Connecting...</div>
           <div id="turn-indicator">Waiting...</div>
-          <div id="turn-count-info">Turns: -/-</div>
+          <div id="turn-count-info">Round: -/100</div>
           <div id="online-count">Online: -</div>
         </div>
         <div id="leaderboard" class="card-panel">

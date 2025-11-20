@@ -7,10 +7,8 @@ import os
 
 app = FastAPI()
 
-# サーバー上のファイルパスを正しく取得
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ★修正: Renderのヘルスチェック(HEAD)に対応させる
 @app.api_route("/", methods=["GET", "HEAD"])
 async def get(request: Request = None):
     return FileResponse(os.path.join(BASE_DIR, 'index.html'))
@@ -23,8 +21,6 @@ async def get_css():
 async def get_js():
     return FileResponse(os.path.join(BASE_DIR, 'script.js'))
 
-# --- ゲームロジック ---
-
 class GameRoom:
     def __init__(self):
         self.active_connections: dict[WebSocket, int] = {}
@@ -35,15 +31,16 @@ class GameRoom:
         self.current_turn: int = 0
         self.host_id: int = 0
         self.is_playing: bool = False
-        self.max_turns: int = 0
-        self.current_turn_count: int = 0
+        
+        # ★変更: ターン数ではなく「総ターン数」をカウントしてラウンドを計算
+        self.total_turns_taken: int = 0
+        self.MAX_ROUNDS: int = 100
 
         self.turn_start_time: float = 0
         self.skip_votes: set[int] = set()
         self.reset_votes: set[int] = set()
 
     async def broadcast(self, message: dict):
-        # 安全対策: リストをコピーしてから回す
         for connection in list(self.active_connections.keys()):
             try:
                 await connection.send_json(message)
@@ -53,7 +50,7 @@ class GameRoom:
     def rotate_turn(self):
         self.skip_votes.clear()
         self.turn_start_time = time.time()
-        self.current_turn_count += 1
+        self.total_turns_taken += 1 # 総ターン数を加算
         
         if not self.active_connections:
             self.current_turn = 0
@@ -135,9 +132,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             ranking.append({"id": pid, "name": name, "score": score})
         ranking.sort(key=lambda x: x["score"], reverse=True)
 
+        # ★変更: 現在のラウンド数を計算 ( (総ターン / 人数) + 1 )
+        player_count = len(room.active_connections)
+        current_round = 1
+        if player_count > 0:
+            current_round = (room.total_turns_taken // player_count) + 1
+
         message = {
             "type": "game_state",
-            "count": len(room.active_connections),
+            "count": player_count,
             "ranking": ranking,
             "current_turn": room.current_turn,
             "turn_start_time": room.turn_start_time,
@@ -145,7 +148,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             "reset_votes": list(room.reset_votes),
             "host_id": room.host_id,
             "is_playing": room.is_playing,
-            "turns_info": f"{room.current_turn_count}/{room.max_turns}" if room.max_turns > 0 else "∞"
+            "round_info": f"{current_round}/{room.MAX_ROUNDS}" # ラウンド情報を送信
         }
         await room.broadcast(message)
 
@@ -160,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             for pid in room.scores: room.scores[pid] = 0
             room.reset_votes.clear()
             room.skip_votes.clear()
-            room.current_turn_count = 0
+            room.total_turns_taken = 0 # リセット時はラウンドも最初から
             await room.broadcast({"type": "init", "board": room.board})
             await broadcast_room_state()
             return
@@ -175,16 +178,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             data = await websocket.receive_text()
             message = json.loads(data)
 
+            # ■ ゲーム開始 (ターン指定なし)
             if message["type"] == "start_game":
                 if current_player_id == room.host_id:
-                    try:
-                        val = message.get("max_turns", 0)
-                        if val == "": val = 0
-                        room.max_turns = int(val)
-                    except ValueError:
-                        room.max_turns = 0
-                    
-                    room.current_turn_count = 1
+                    room.total_turns_taken = 0
                     room.is_playing = True
                     room.current_turn = room.host_id
                     room.turn_start_time = time.time()
@@ -240,12 +237,19 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                     await room.broadcast({"type": "batch_update", "updates": cleared_updates})
                     await broadcast_room_state()
 
+            # ■ ターン終了 / パス時の処理
             elif message["type"] == "end_turn" or message["type"] == "pass_turn":
                 if room.current_turn == current_player_id:
-                    if room.max_turns > 0 and room.current_turn_count >= room.max_turns:
+                    # 現在のラウンドを計算
+                    player_count = len(room.active_connections)
+                    current_round = (room.total_turns_taken // player_count) + 1
+                    
+                    # 100ラウンドを超えたら終了
+                    if current_round > room.MAX_ROUNDS:
                         room.is_playing = False
                         await room.broadcast({"type": "game_over", "ranking": []})
                         room.current_turn = 0
+                        room.total_turns_taken = 0
                     else:
                         room.rotate_turn()
                         await broadcast_room_state()

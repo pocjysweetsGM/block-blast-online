@@ -1,6 +1,7 @@
 /* script.js */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+
 const CELL_SIZE = 50;
 const HAND_CELL_SIZE = 30;
 const BOARD_SIZE = 8;
@@ -61,16 +62,21 @@ refillHand();
 
 // --- 詰み判定 ---
 function checkCanPlace() {
+    let hasBlocks = false;
     for (let i = 0; i < currentHand.length; i++) {
         const shape = currentHand[i];
         if (shape === null) continue;
+        hasBlocks = true; // まだブロックがある
         for (let row = 0; row < BOARD_SIZE; row++) {
             for (let col = 0; col < BOARD_SIZE; col++) {
-                if (canFit(shape, row, col)) return true;
+                if (canFit(shape, row, col)) return true; // 1つでも置ける場所があればOK
             }
         }
     }
-    return false;
+    // ブロックが全部nullなら「詰み」ではない（ターン終了処理へ）
+    if (!hasBlocks) return true; 
+    
+    return false; // ブロックがあるのに置く場所がない＝詰み
 }
 
 function canFit(shape, startRow, startCol) {
@@ -90,7 +96,12 @@ async function triggerAutoPass() {
     const overlay = document.getElementById('pass-overlay');
     overlay.classList.add('active');
     document.getElementById('gameCanvas').classList.add('inactive-canvas');
+    
+    // 手札をクリアして次のターンで補充されるようにする
+    currentHand = [null, null, null];
+    
     await new Promise(r => setTimeout(r, 2000));
+    
     ws.send(JSON.stringify({type: 'pass_turn'}));
     overlay.classList.remove('active');
 }
@@ -139,7 +150,7 @@ function joinLobby() {
             currentResetVotes = data.reset_votes;
             hostId = data.host_id;
             isPlaying = data.is_playing;
-            document.getElementById('turn-count-info').innerText = `Turns: ${data.turns_info}`;
+            document.getElementById('turn-count-info').innerText = `Round: ${data.round_info}`;
 
             updateLobby(data.ranking);
             
@@ -151,8 +162,16 @@ function joinLobby() {
                 updateTurnDisplay(data.ranking);
                 updateRanking(data.ranking);
                 updateButtons();
+                
+                // ★ターンが回ってきた時、もし手札が空なら補充
                 if (currentTurnId === myPlayerId) {
-                    if (!checkCanPlace()) triggerAutoPass();
+                    if (currentHand.every(s => s === null)) {
+                        refillHand();
+                    }
+                    // ★その上で詰み判定
+                    if (!checkCanPlace()) {
+                        triggerAutoPass();
+                    }
                 }
             }
         }
@@ -176,7 +195,7 @@ function updateLobby(ranking) {
     list.innerHTML = "";
     if (myPlayerId === hostId) {
         document.getElementById('host-controls').style.display = 'block';
-        document.getElementById('lobby-status').innerText = "You are the Host. Configure and Start.";
+        document.getElementById('lobby-status').innerText = "You are the Host. Start when ready.";
     } else {
         document.getElementById('host-controls').style.display = 'none';
         document.getElementById('lobby-status').innerText = "Waiting for host to start...";
@@ -196,9 +215,9 @@ function updateLobby(ranking) {
     });
 }
 
+// ★修正: ターン数指定なし
 function requestStartGame() {
-    const maxTurns = document.getElementById('maxTurnsInput').value;
-    ws.send(JSON.stringify({type: 'start_game', max_turns: maxTurns}));
+    ws.send(JSON.stringify({type: 'start_game'}));
 }
 
 function kickPlayer(targetId) {
@@ -206,7 +225,11 @@ function kickPlayer(targetId) {
 }
 
 function manualPass() {
-    if(confirm("Skip your turn?")) ws.send(JSON.stringify({type: 'pass_turn'}));
+    if(confirm("Skip your turn?")) {
+        // 手動パスの時も手札をクリアする
+        currentHand = [null, null, null];
+        ws.send(JSON.stringify({type: 'pass_turn'}));
+    }
 }
 
 function checkTurnTimer() {
@@ -250,6 +273,48 @@ function drawShape(shape, startX, startY, size, color, theme) { ctx.fillStyle = 
 function getCanvasCoordinates(event) { const rect = canvas.getBoundingClientRect(); let clientX, clientY; if (event.touches && event.touches.length > 0) { clientX = event.touches[0].clientX; clientY = event.touches[0].clientY; } else { clientX = event.clientX; clientY = event.clientY; } const scaleX = canvas.width / rect.width; const scaleY = canvas.height / rect.height; return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }; }
 function handleStart(e) { if (currentTurnId !== myPlayerId) return; if(e.type === 'touchstart') e.preventDefault(); const pos = getCanvasCoordinates(e); if (pos.y > 400) { const slotWidth = 400 / 3; const clickedSlotIndex = Math.floor(pos.x / slotWidth); if (clickedSlotIndex >= 0 && clickedSlotIndex < 3) { const shape = currentHand[clickedSlotIndex]; if (shape !== null) { draggingIdx = clickedSlotIndex; dragX = pos.x - (shape[0].length * CELL_SIZE) / 2; dragY = pos.y - (shape.length * CELL_SIZE) / 2; } } } }
 function handleMove(e) { if (draggingIdx !== -1) { if(e.type === 'touchmove') e.preventDefault(); const pos = getCanvasCoordinates(e); const shape = currentHand[draggingIdx]; dragX = pos.x - (shape[0].length * CELL_SIZE) / 2; dragY = pos.y - (shape.length * CELL_SIZE) / 2; } }
-function handleEnd(e) { if (draggingIdx !== -1) { if(e.type === 'touchend') e.preventDefault(); const shape = currentHand[draggingIdx]; const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE); let canPlace = true; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false; else if (board[placeRow + r][placeCol + c] === 1) canPlace = false; } if (placeRow + shape.length > BOARD_SIZE || placeCol + shape[0].length > BOARD_SIZE) canPlace = false; } } if (canPlace) { const updates = []; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1}); } } } ws.send(JSON.stringify({type: 'batch_update', updates: updates})); currentHand[draggingIdx] = null; if (currentHand.every(s => s === null)) { refillHand(); ws.send(JSON.stringify({type: 'end_turn'})); } } draggingIdx = -1; } }
+
+// ★重要修正: handleEndでのオートパス判定
+function handleEnd(e) {
+    if (draggingIdx !== -1) {
+        if(e.type === 'touchend') e.preventDefault();
+        const shape = currentHand[draggingIdx];
+        const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
+        let canPlace = true;
+        for(let r=0; r<shape.length; r++) {
+            for(let c=0; c<shape[r].length; c++) {
+                if(shape[r][c] === 1) {
+                    if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false;
+                    else if (board[placeRow + r][placeCol + c] === 1) canPlace = false;
+                }
+                if (placeRow + shape.length > BOARD_SIZE || placeCol + shape[0].length > BOARD_SIZE) canPlace = false;
+            }
+        }
+        if (canPlace) {
+            const updates = [];
+            for(let r=0; r<shape.length; r++) {
+                for(let c=0; c<shape[r].length; c++) {
+                    if(shape[r][c] === 1) {
+                        const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1});
+                    }
+                }
+            }
+            ws.send(JSON.stringify({type: 'batch_update', updates: updates}));
+            currentHand[draggingIdx] = null;
+
+            if (currentHand.every(s => s === null)) {
+                refillHand();
+                ws.send(JSON.stringify({type: 'end_turn'}));
+            } else {
+                // ★ブロックを置いた後、残りの手札で置ける場所がなければオートパス
+                if (!checkCanPlace()) {
+                    triggerAutoPass();
+                }
+            }
+        }
+        draggingIdx = -1;
+    }
+}
+
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd);
 canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});

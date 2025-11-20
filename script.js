@@ -1,26 +1,16 @@
 /* script.js */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-
 const CELL_SIZE = 50;
 const HAND_CELL_SIZE = 30;
 const BOARD_SIZE = 8;
-// ★指からどれくらい上にブロックを表示するか (px)
+// ★手札の描画位置を少し上げる (450 -> 430)
+const HAND_START_Y = 430; 
 const DRAG_OFFSET_Y = 80; 
 
 const THEMES = {
-    dark: { 
-        boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', 
-        blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d',
-        ghostColor: 'rgba(52, 152, 219, 0.3)', // 予測ブロックの色
-        highlightColor: 'rgba(46, 204, 113, 0.5)' // 揃うラインの色
-    },
-    light: { 
-        boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', 
-        blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3',
-        ghostColor: 'rgba(9, 132, 227, 0.3)',
-        highlightColor: 'rgba(0, 184, 148, 0.5)'
-    }
+    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
+    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 let currentTheme = 'dark';
 function toggleTheme(checkbox) {
@@ -48,7 +38,7 @@ const SHAPES = [
 let board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
 let currentHand = [];
 let draggingIdx = -1;
-let dragX = 0, dragY = 0; // ※これは「ブロックの左上」の座標
+let dragX = 0, dragY = 0;
 let myPlayerId = null;
 let hostId = 0;
 let currentTurnId = 0;
@@ -76,6 +66,14 @@ function showModal(title, message, onConfirm, isConfirm = false) {
     newCancel.addEventListener('click', () => { modal.style.display = 'none'; });
     modal.style.display = 'flex';
 }
+function openRankingModal() {
+    document.getElementById('ranking-modal').style.display = 'flex';
+}
+function closeRankingModal(e) {
+    if(e === null || e.target.id === 'ranking-modal') {
+        document.getElementById('ranking-modal').style.display = 'none';
+    }
+}
 
 function refillHand() {
     currentHand = [
@@ -93,13 +91,10 @@ function checkCanPlace() {
         if (shape === null) continue;
         hasBlocks = true;
         for (let row = 0; row < BOARD_SIZE; row++) {
-            for (let col = 0; col < BOARD_SIZE; col++) {
-                if (canFit(shape, row, col)) return true;
-            }
+            for (let col = 0; col < BOARD_SIZE; col++) { if (canFit(shape, row, col)) return true; }
         }
     }
-    if (!hasBlocks) return true; 
-    return false;
+    if (!hasBlocks) return true; return false;
 }
 function canFit(shape, startRow, startCol) {
     for (let r = 0; r < shape.length; r++) {
@@ -147,6 +142,7 @@ function startGame() {
         else if (data.type === "welcome") {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
+            if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
             updateBoard(data.board);
         }
         else if (data.type === "game_state") {
@@ -156,10 +152,13 @@ function startGame() {
             turnStartTime = data.turn_start_time;
             currentSkipVotes = data.skip_votes;
             currentResetVotes = data.reset_votes;
+            hostId = data.host_id;
             document.getElementById('turn-count-info').innerText = `Round: ${data.round_info}`;
             updateTurnDisplay(data.ranking);
             updateRanking(data.ranking);
             updateButtons();
+            updateVotePopup(); // 投票状況ポップアップ更新
+            
             if (currentTurnId === myPlayerId) {
                 if (currentHand.every(s => s === null)) refillHand();
                 if (!checkCanPlace()) triggerAutoPass();
@@ -177,235 +176,162 @@ function startGame() {
     ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
 
-function manualPass() {
-    showModal("SKIP TURN", "本当にスキップしますか？", () => {
-        currentHand = [null, null, null];
-        ws.send(JSON.stringify({type: 'pass_turn'}));
-    }, true);
-}
-function checkTurnTimer() {
-    if (!turnStartTime || !isPlaying) return;
-    const now = Date.now() / 1000; const diff = now - turnStartTime;
-    const skipBtn = document.getElementById('vote-skip-btn');
-    if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) {
-        skipBtn.style.display = 'flex'; // flexに変更
+// ★ボタン制御 (統合)
+function handleSkipAction() {
+    const now = Date.now() / 1000;
+    const diff = now - turnStartTime;
+    
+    if (currentTurnId === myPlayerId) {
+        // 自分のターン: 即スキップ (Vetoじゃなく手動パス)
+        showModal("SKIP TURN", "本当にスキップしますか？", () => {
+            currentHand = [null, null, null];
+            ws.send(JSON.stringify({type: 'pass_turn'}));
+        }, true);
     } else {
-        skipBtn.style.display = 'none';
+        // 他人のターン: 1分経過後なら投票
+        if (diff > 60) {
+            ws.send(JSON.stringify({type: 'vote_skip'}));
+        } else {
+            // まだ押せない
+            // showModal("WAIT", "1分経過するまで投票できません", null);
+        }
     }
 }
+
+function checkTurnTimer() {
+    if (!turnStartTime) return;
+    updateButtons();
+}
+
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
-    const resetCount = currentResetVotes.length;
-    if (currentResetVotes.includes(myPlayerId)) { resetBtn.classList.add('voted'); } else { resetBtn.classList.remove('voted'); }
+    if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted');
+    else resetBtn.classList.remove('voted');
+
+    const skipBtn = document.getElementById('action-skip-btn');
+    const skipIcon = document.getElementById('skip-icon');
     
-    const skipBtn = document.getElementById('vote-skip-btn');
-    if (currentSkipVotes.includes(myPlayerId)) { skipBtn.classList.add('voted'); } else { skipBtn.classList.remove('voted'); }
-    
-    const selfSkipBtn = document.getElementById('self-skip-btn');
-    if(currentTurnId === myPlayerId) selfSkipBtn.style.display = 'flex';
-    else selfSkipBtn.style.display = 'none';
+    if (currentTurnId === myPlayerId) {
+        // 自分のターン
+        skipBtn.className = 'icon-btn self-skip';
+        skipIcon.innerText = 'skip_next';
+        skipBtn.disabled = false;
+    } else {
+        // 他人のターン
+        const now = Date.now() / 1000;
+        const diff = now - turnStartTime;
+        
+        if (diff > 60 && totalPlayers > 1) {
+            skipBtn.disabled = false;
+            skipIcon.innerText = 'gavel'; // ハンマーアイコン
+            if (currentSkipVotes.includes(myPlayerId)) {
+                skipBtn.className = 'icon-btn voted';
+            } else {
+                skipBtn.className = 'icon-btn vote-active';
+            }
+        } else {
+            // 待機中
+            skipBtn.className = 'icon-btn vote-wait';
+            skipIcon.innerText = 'gavel';
+            skipBtn.disabled = true;
+        }
+    }
+}
+
+function updateVotePopup() {
+    const popup = document.getElementById('vote-status-popup');
+    const countDisplay = document.getElementById('vote-count-display');
+    const vetoBtn = document.getElementById('veto-btn');
+    const required = Math.max(1, totalPlayers - 1);
+
+    if (currentSkipVotes.length > 0) {
+        popup.classList.add('active');
+        countDisplay.innerText = `${currentSkipVotes.length} / ${required}`;
+        
+        // ターゲット本人ならVETOボタン表示
+        if (currentTurnId === myPlayerId) {
+            vetoBtn.style.display = 'block';
+        } else {
+            vetoBtn.style.display = 'none';
+        }
+    } else {
+        popup.classList.remove('active');
+    }
 }
 
 window.voteReset = function() { ws.send(JSON.stringify({type: 'vote_reset'})); };
 window.voteSkip = function() { ws.send(JSON.stringify({type: 'vote_skip'})); };
-window.exitGame = function() {
-    showModal("EXIT", "退出しますか？", () => { if (ws) { ws.close(); ws = null; } location.reload(); }, true);
-};
+window.vetoSkip = function() { ws.send(JSON.stringify({type: 'veto_skip'})); };
+window.exitGame = function() { showModal("EXIT", "退出しますか？", () => { if (ws) { ws.close(); ws = null; } location.reload(); }, true); };
+
+function kickPlayer(targetId) {
+    if(confirm("Kick this player?")) ws.send(JSON.stringify({type: 'kick_player', target_id: targetId}));
+}
 
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }
 function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p.name); const indicator = document.getElementById('turn-indicator'); const canvasEl = document.getElementById('gameCanvas'); if (currentTurnId === myPlayerId) { indicator.innerText = "YOUR TURN"; indicator.classList.add('my-turn'); canvasEl.classList.remove('inactive-canvas'); } else { const name = playerNames[currentTurnId] || `PLAYER ${currentTurnId}`; indicator.innerText = `TURN: ${name}`; indicator.classList.remove('my-turn'); canvasEl.classList.add('inactive-canvas'); } }
-function updateRanking(rankingData) { const list = document.getElementById('score-list'); list.innerHTML = ""; rankingData.forEach(player => { const li = document.createElement('li'); const isMe = (player.id === myPlayerId); const isTurn = (player.id === currentTurnId); let className = ""; if (isMe) className += "highlight-me "; if (isTurn) className += "turn-active "; li.className = className; li.innerHTML = `<span>${player.name.toUpperCase()}</span> <span>${player.score}</span>`; list.appendChild(li); }); }
-
-// --- 描画 ---
-function draw() {
-    if(document.getElementById('game-container').style.display === 'none') return;
-    const theme = THEMES[currentTheme];
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = theme.boardBg; ctx.fillRect(0, 0, canvas.width, 400);
-    ctx.fillStyle = theme.handBg; ctx.fillRect(0, 400, canvas.width, 200);
-
-    // グリッドとブロック
-    for (let row = 0; row < BOARD_SIZE; row++) {
-        for (let col = 0; col < BOARD_SIZE; col++) {
-            const x = col * CELL_SIZE; const y = row * CELL_SIZE;
-            ctx.strokeStyle = theme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
-            if (board[row][col] === 1) {
-                ctx.fillStyle = theme.blockColor; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-                ctx.fillStyle = theme.blockGloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12);
-            }
-        }
-    }
+function updateRanking(rankingData) { 
+    const list = document.getElementById('score-list'); list.innerHTML = ""; 
+    const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
     
-    // ★予測線 (ゴースト) の描画
+    rankingData.forEach(player => { 
+        const isMe = (player.id === myPlayerId); 
+        const isTurn = (player.id === currentTurnId); 
+        let text = player.name.toUpperCase();
+        if(player.id === hostId) text = "👑 " + text;
+
+        const li = document.createElement('li'); 
+        let className = ""; if (isMe) className += "highlight-me "; if (isTurn) className += "turn-active "; 
+        li.className = className; 
+        li.innerHTML = `<span>${text}</span> <span>${player.score}</span>`; 
+        list.appendChild(li); 
+
+        // フルランキング用
+        const fullLi = li.cloneNode(true);
+        // ホストならキックボタン追加
+        if (myPlayerId === hostId && player.id !== myPlayerId) {
+            const kickBtn = document.createElement('button');
+            kickBtn.className = 'kick-btn'; kickBtn.innerText = 'KICK'; kickBtn.onclick = (e) => { e.stopPropagation(); kickPlayer(player.id); };
+            fullLi.appendChild(kickBtn);
+        }
+        fullList.appendChild(fullLi);
+    }); 
+}
+function draw() { if(document.getElementById('game-container').style.display === 'none') return; const theme = THEMES[currentTheme]; ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = theme.boardBg; ctx.fillRect(0, 0, canvas.width, 400); ctx.fillStyle = theme.handBg; ctx.fillRect(0, 400, canvas.width, 200); for (let row = 0; row < BOARD_SIZE; row++) { for (let col = 0; col < BOARD_SIZE; col++) { const x = col * CELL_SIZE; const y = row * CELL_SIZE; ctx.strokeStyle = theme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE); if (board[row][col] === 1) { ctx.fillStyle = theme.blockColor; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4); ctx.fillStyle = theme.blockGloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12); } } } ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1; 
     if (draggingIdx !== -1 && currentTurnId === myPlayerId) {
         const shape = currentHand[draggingIdx];
-        // dragX, dragYは「ブロックの左上」の座標
-        const placeCol = Math.round(dragX / CELL_SIZE);
-        const placeRow = Math.round(dragY / CELL_SIZE);
-        
-        // 置けるかチェック
+        // ★修正: dragX, dragYは指の位置に近いので、ブロック左上座標に変換する必要があるが、
+        // そもそも handleStart/Move で計算した dragX/Y は「ブロック左上」を指すようにしているためそのまま使える。
+        // ただし吸着ロジックで round しているのでそれに合わせる
+        const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
         if (canFit(shape, placeRow, placeCol)) {
-            // 揃うラインを探す
             const lines = checkPotentialClears(shape, placeRow, placeCol);
-            
-            // ハイライト描画 (揃うラインを光らせる)
             if (lines.rows.length > 0 || lines.cols.length > 0) {
                 ctx.fillStyle = theme.highlightColor;
-                // 行
                 lines.rows.forEach(r => ctx.fillRect(0, r * CELL_SIZE, canvas.width, CELL_SIZE));
-                // 列
                 lines.cols.forEach(c => ctx.fillRect(c * CELL_SIZE, 0, CELL_SIZE, 400));
             }
-
-            // ゴーストブロック描画
             ctx.fillStyle = theme.ghostColor;
-            for(let r = 0; r < shape.length; r++) {
-                for(let c = 0; c < shape[r].length; c++) {
-                    if(shape[r][c] === 1) {
-                        ctx.fillRect((placeCol + c) * CELL_SIZE, (placeRow + r) * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-                    }
-                }
-            }
+            for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect((placeCol + c) * CELL_SIZE, (placeRow + r) * CELL_SIZE, CELL_SIZE, CELL_SIZE); } } }
         }
     }
+    drawHand(theme); for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); } requestAnimationFrame(draw); }
 
-    ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1;
-    drawHand(theme);
-    for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); }
-    requestAnimationFrame(draw);
-}
-
-// ラインが揃うかシミュレーションする関数
 function checkPotentialClears(shape, startRow, startCol) {
-    // 仮の盤面を作成
     let tempBoard = board.map(row => [...row]);
-    // ブロックを配置
-    for(let r=0; r<shape.length; r++) {
-        for(let c=0; c<shape[r].length; c++) {
-            if(shape[r][c] === 1) {
-                tempBoard[startRow + r][startCol + c] = 1;
-            }
-        }
-    }
-    // 揃った列を探す
-    let rows = [];
-    let cols = [];
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        if (tempBoard[r].every(cell => cell === 1)) rows.push(r);
-    }
-    for (let c = 0; c < BOARD_SIZE; c++) {
-        let full = true;
-        for (let r = 0; r < BOARD_SIZE; r++) {
-            if (tempBoard[r][c] === 0) full = false;
-        }
-        if (full) cols.push(c);
-    }
+    for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { tempBoard[startRow + r][startCol + c] = 1; } } }
+    let rows = []; let cols = [];
+    for (let r = 0; r < BOARD_SIZE; r++) { if (tempBoard[r].every(cell => cell === 1)) rows.push(r); }
+    for (let c = 0; c < BOARD_SIZE; c++) { let full = true; for (let r = 0; r < BOARD_SIZE; r++) { if (tempBoard[r][c] === 0) full = false; } if (full) cols.push(c); }
     return { rows, cols };
 }
 
-function drawHand(theme) {
-    const handStartY = 450; const handHeight = 150; const slotWidth = 400 / 3;
-    currentHand.forEach((shape, index) => {
-        if (shape === null) return;
-        if (index === draggingIdx) {
-            drawShape(shape, dragX, dragY, CELL_SIZE, theme.blockColor, theme);
-        } else {
-            const shapeW = shape[0].length * HAND_CELL_SIZE; const shapeH = shape.length * HAND_CELL_SIZE;
-            const slotCX = (index * slotWidth) + (slotWidth / 2); const slotCY = handStartY + (handHeight / 2);
-            const color = (currentTurnId === myPlayerId) ? theme.blockColor : theme.inactiveHand;
-            drawShape(shape, slotCX - shapeW/2, slotCY - shapeH/2, HAND_CELL_SIZE, color, theme);
-        }
-    });
-}
-
-function drawShape(shape, startX, startY, size, color, theme) {
-    ctx.fillStyle = color;
-    for(let r = 0; r < shape.length; r++) {
-        for(let c = 0; c < shape[r].length; c++) {
-            if(shape[r][c] === 1) {
-                ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2);
-                ctx.fillStyle = theme.blockGloss; ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
-                ctx.fillStyle = color;
-            }
-        }
-    }
-}
-
-function getCanvasCoordinates(event) {
-    const rect = canvas.getBoundingClientRect(); let clientX, clientY;
-    if (event.touches && event.touches.length > 0) { clientX = event.touches[0].clientX; clientY = event.touches[0].clientY; }
-    else { clientX = event.clientX; clientY = event.clientY; }
-    const scaleX = canvas.width / rect.width; const scaleY = canvas.height / rect.height;
-    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
-}
-
-function handleStart(e) {
-    if (currentTurnId !== myPlayerId) return;
-    if(e.type === 'touchstart') e.preventDefault();
-    const pos = getCanvasCoordinates(e);
-    if (pos.y > 400) {
-        const slotWidth = 400 / 3; const clickedSlotIndex = Math.floor(pos.x / slotWidth);
-        if (clickedSlotIndex >= 0 && clickedSlotIndex < 3) {
-            const shape = currentHand[clickedSlotIndex];
-            if (shape !== null) { 
-                draggingIdx = clickedSlotIndex;
-                const blockW = shape[0].length * CELL_SIZE;
-                const blockH = shape.length * CELL_SIZE;
-                // ★指の上に表示 (オフセット適用)
-                dragX = pos.x - (blockW / 2);
-                dragY = pos.y - blockH - DRAG_OFFSET_Y; 
-            }
-        }
-    }
-}
-function handleMove(e) {
-    if (draggingIdx !== -1) {
-        if(e.type === 'touchmove') e.preventDefault();
-        const pos = getCanvasCoordinates(e);
-        const shape = currentHand[draggingIdx];
-        const blockW = shape[0].length * CELL_SIZE;
-        const blockH = shape.length * CELL_SIZE;
-        // ★移動中も指の上に表示
-        dragX = pos.x - (blockW / 2);
-        dragY = pos.y - blockH - DRAG_OFFSET_Y;
-    }
-}
-function handleEnd(e) {
-    if (draggingIdx !== -1) {
-        if(e.type === 'touchend') e.preventDefault();
-        const shape = currentHand[draggingIdx];
-        // ★判定も「見えている場所」で行う
-        const placeCol = Math.round(dragX / CELL_SIZE); 
-        const placeRow = Math.round(dragY / CELL_SIZE);
-        let canPlace = true;
-        for(let r=0; r<shape.length; r++) {
-            for(let c=0; c<shape[r].length; c++) {
-                if(shape[r][c] === 1) {
-                    if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false;
-                    else if (board[placeRow + r][placeCol + c] === 1) canPlace = false;
-                }
-                if (placeRow + shape.length > BOARD_SIZE || placeCol + shape[0].length > BOARD_SIZE) canPlace = false;
-            }
-        }
-        if (canPlace) {
-            const updates = [];
-            for(let r=0; r<shape.length; r++) {
-                for(let c=0; c<shape[r].length; c++) {
-                    if(shape[r][c] === 1) {
-                        const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1});
-                    }
-                }
-            }
-            ws.send(JSON.stringify({type: 'batch_update', updates: updates}));
-            currentHand[draggingIdx] = null;
-            if (currentHand.every(s => s === null)) { refillHand(); ws.send(JSON.stringify({type: 'end_turn'})); }
-            else { if (!checkCanPlace()) { triggerAutoPass(); } }
-        }
-        draggingIdx = -1;
-    }
-}
-
-canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd);
-canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
+function drawHand(theme) { const handStartY = HAND_START_Y; const handHeight = 150; const slotWidth = 400 / 3; currentHand.forEach((shape, index) => { if (shape === null) return; if (index === draggingIdx) drawShape(shape, dragX, dragY, CELL_SIZE, theme.blockColor, theme); else { const shapeW = shape[0].length * HAND_CELL_SIZE; const shapeH = shape.length * HAND_CELL_SIZE; const slotCX = (index * slotWidth) + (slotWidth / 2); const slotCY = handStartY + (handHeight / 2); const color = (currentTurnId === myPlayerId) ? theme.blockColor : theme.inactiveHand; drawShape(shape, slotCX - shapeW/2, slotCY - shapeH/2, HAND_CELL_SIZE, color, theme); } }); }
+function drawShape(shape, startX, startY, size, color, theme) { ctx.fillStyle = color; for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2); ctx.fillStyle = theme.blockGloss; ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4); ctx.fillStyle = color; } } } }
+function getCanvasCoordinates(event) { const rect = canvas.getBoundingClientRect(); let clientX, clientY; if (event.touches && event.touches.length > 0) { clientX = event.touches[0].clientX; clientY = event.touches[0].clientY; } else { clientX = event.clientX; clientY = event.clientY; } const scaleX = canvas.width / rect.width; const scaleY = canvas.height / rect.height; return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY }; }
+function handleStart(e) { if (currentTurnId !== myPlayerId) return; if(e.type === 'touchstart') e.preventDefault(); const pos = getCanvasCoordinates(e); if (pos.y > 400) { const slotWidth = 400 / 3; const clickedSlotIndex = Math.floor(pos.x / slotWidth); if (clickedSlotIndex >= 0 && clickedSlotIndex < 3) { const shape = currentHand[clickedSlotIndex]; if (shape !== null) { draggingIdx = clickedSlotIndex; const blockW = shape[0].length * CELL_SIZE; const blockH = shape.length * CELL_SIZE; dragX = pos.x - (blockW / 2); dragY = pos.y - blockH - DRAG_OFFSET_Y; } } } }
+function handleMove(e) { if (draggingIdx !== -1) { if(e.type === 'touchmove') e.preventDefault(); const pos = getCanvasCoordinates(e); const shape = currentHand[draggingIdx]; const blockW = shape[0].length * CELL_SIZE; const blockH = shape.length * CELL_SIZE; dragX = pos.x - (blockW / 2); dragY = pos.y - blockH - DRAG_OFFSET_Y; } }
+function handleEnd(e) { if (draggingIdx !== -1) { if(e.type === 'touchend') e.preventDefault(); const shape = currentHand[draggingIdx]; const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE); let canPlace = true; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { if (placeRow + r < 0 || placeRow + r >= BOARD_SIZE || placeCol + c < 0 || placeCol + c >= BOARD_SIZE) canPlace = false; else if (board[placeRow + r][placeCol + c] === 1) canPlace = false; } } } if (canPlace) { const updates = []; for(let r=0; r<shape.length; r++) { for(let c=0; c<shape[r].length; c++) { if(shape[r][c] === 1) { const tR = placeRow + r; const tC = placeCol + c; board[tR][tC] = 1; updates.push({row: tR, col: tC, value: 1}); } } } ws.send(JSON.stringify({type: 'batch_update', updates: updates})); currentHand[draggingIdx] = null; if (currentHand.every(s => s === null)) { refillHand(); ws.send(JSON.stringify({type: 'end_turn'})); } else { if (!checkCanPlace()) { triggerAutoPass(); } } } draggingIdx = -1; } }
+canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});

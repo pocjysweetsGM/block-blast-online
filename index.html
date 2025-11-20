@@ -36,25 +36,8 @@
           </label>
           <span id="mode-label">Dark Mode</span>
         </div>
-        <button class="start-btn" onclick="joinLobby()">ENTER LOBBY</button>
+        <button class="start-btn" onclick="startGame()">START GAME</button>
         <p id="error-msg"></p>
-      </div>
-    </div>
-
-    <div id="lobby-screen" style="display: none">
-      <h1>LOBBY</h1>
-      <div class="card-panel">
-        <h2 id="lobby-room-name">Room: -</h2>
-        <div id="lobby-status">Waiting for host...</div>
-
-        <div id="host-controls" style="display: none">
-          <button class="start-btn" onclick="requestStartGame()">
-            START GAME
-          </button>
-        </div>
-
-        <h3>Players</h3>
-        <ul id="lobby-player-list"></ul>
       </div>
     </div>
 

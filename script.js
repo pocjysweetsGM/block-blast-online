@@ -5,7 +5,6 @@ const CELL_SIZE = 50;
 const HAND_CELL_SIZE = 30;
 const BOARD_SIZE = 8;
 
-// ... (THEMES, SHAPES 定義は変更なし。長いので省略しても既存のままでOKですが、念のため全て載せます) ...
 const THEMES = {
     dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d' },
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3' }
@@ -16,6 +15,7 @@ function toggleTheme(checkbox) {
     else { currentTheme = 'dark'; document.body.classList.remove('light-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; }
     draw();
 }
+
 const SHAPES = [
     [[1]], [[1, 1]], [[1], [1]], [[1, 1, 1]], [[1], [1], [1]],
     [[1, 1, 1, 1]], [[1], [1], [1], [1]], [[1, 1, 1, 1, 1]], [[1], [1], [1], [1], [1]],
@@ -36,10 +36,9 @@ let board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
 let currentHand = [];
 let draggingIdx = -1;
 let dragX = 0, dragY = 0;
+
 let myPlayerId = null;
-let hostId = 0;
 let currentTurnId = 0;
-let isPlaying = false;
 let playerNames = {};
 let ws = null;
 let particles = [];
@@ -86,7 +85,6 @@ function canFit(shape, startRow, startCol) {
     return true;
 }
 async function triggerAutoPass() {
-    console.log("[DEBUG] Auto Pass Triggered");
     const overlay = document.getElementById('pass-overlay');
     overlay.classList.add('active');
     document.getElementById('gameCanvas').classList.add('inactive-canvas');
@@ -97,11 +95,9 @@ async function triggerAutoPass() {
 }
 
 // --- 通信関連 ---
-function joinLobby() {
+function startGame() {
     const roomInput = document.getElementById('roomInput').value.trim();
     const nameInput = document.getElementById('nameInput').value.trim();
-    console.log(`[DEBUG] Joining lobby: ${roomInput}, Name: ${nameInput}`);
-
     if (!roomInput) { document.getElementById('error-msg').innerText = "合言葉を入力してください"; return; }
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -112,28 +108,22 @@ function joinLobby() {
     ws = new WebSocket(url);
 
     ws.onopen = function() {
-        console.log("[DEBUG] WebSocket Connected");
+        // 接続したら即ゲーム画面へ
         document.getElementById('title-screen').style.display = 'none';
-        document.getElementById('lobby-screen').style.display = 'flex';
-        document.getElementById('lobby-room-name').innerText = `Room: ${roomInput.toUpperCase()}`;
+        document.getElementById('game-container').style.display = 'flex';
+        document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
+        draw();
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
 
     ws.onmessage = function(event) {
-        // console.log("[DEBUG] Message Received:", event.data); // 通信量が多い場合はここをコメントアウト
         const data = JSON.parse(event.data);
 
         if (data.type === "error") { alert(data.message); location.reload(); }
         else if (data.type === "welcome") {
-            console.log(`[DEBUG] Welcome received. My ID: ${data.your_id}`);
             myPlayerId = data.your_id;
-            hostId = data.host_id;
-            isPlaying = data.is_playing;
-            if(isPlaying) {
-                document.getElementById('lobby-screen').style.display = 'none';
-                document.getElementById('game-container').style.display = 'flex';
-            }
+            document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             updateBoard(data.board);
         }
         else if (data.type === "game_state") {
@@ -143,24 +133,15 @@ function joinLobby() {
             turnStartTime = data.turn_start_time;
             currentSkipVotes = data.skip_votes;
             currentResetVotes = data.reset_votes;
-            hostId = data.host_id;
-            isPlaying = data.is_playing;
             document.getElementById('turn-count-info').innerText = `Round: ${data.round_info}`;
 
-            updateLobby(data.ranking);
+            updateTurnDisplay(data.ranking);
+            updateRanking(data.ranking);
+            updateButtons();
             
-            if (isPlaying) {
-                if(document.getElementById('game-container').style.display === 'none') {
-                    document.getElementById('lobby-screen').style.display = 'none';
-                    document.getElementById('game-container').style.display = 'flex';
-                }
-                updateTurnDisplay(data.ranking);
-                updateRanking(data.ranking);
-                updateButtons();
-                if (currentTurnId === myPlayerId) {
-                    if (currentHand.every(s => s === null)) refillHand();
-                    if (!checkCanPlace()) triggerAutoPass();
-                }
+            if (currentTurnId === myPlayerId) {
+                if (currentHand.every(s => s === null)) refillHand();
+                if (!checkCanPlace()) triggerAutoPass();
             }
         }
         else if (data.type === "batch_update") {
@@ -171,61 +152,21 @@ function joinLobby() {
         }
         else if (data.type === "init") updateBoard(data.board);
         else if (data.type === "game_over") {
-            alert("GAME OVER!");
+            alert("GAME OVER! 100 Rounds Completed.");
             location.reload();
         }
     };
-    ws.onclose = function() { console.log("[DEBUG] WebSocket Closed"); if(timerInterval) clearInterval(timerInterval); };
+    ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
 
-function updateLobby(ranking) {
-    const list = document.getElementById('lobby-player-list');
-    list.innerHTML = "";
-    if (myPlayerId === hostId) {
-        document.getElementById('host-controls').style.display = 'block';
-        document.getElementById('lobby-status').innerText = "You are the Host. Start when ready.";
-    } else {
-        document.getElementById('host-controls').style.display = 'none';
-        document.getElementById('lobby-status').innerText = "Waiting for host to start...";
-    }
-    ranking.forEach(p => {
-        const li = document.createElement('li');
-        let text = p.name;
-        if (p.id === hostId) text += " 👑";
-        if (p.id === myPlayerId) text += " (YOU)";
-        li.innerText = text;
-        if (myPlayerId === hostId && p.id !== myPlayerId) {
-            const kickBtn = document.createElement('button');
-            kickBtn.className = 'kick-btn'; kickBtn.innerText = '×'; kickBtn.onclick = () => kickPlayer(p.id);
-            li.appendChild(kickBtn);
-        }
-        list.appendChild(li);
-    });
-}
-
-// ★ボタンクリック時のデバッグログ
-function requestStartGame() {
-    console.log("[DEBUG] Start Game button clicked");
-    if (ws) {
-        ws.send(JSON.stringify({type: 'start_game'}));
-    } else {
-        console.error("[DEBUG] WebSocket not connected");
-    }
-}
-
-function kickPlayer(targetId) {
-    console.log(`[DEBUG] Kicking player ${targetId}`);
-    if(confirm("Kick this player?")) ws.send(JSON.stringify({type: 'kick_player', target_id: targetId}));
-}
 function manualPass() {
-    console.log("[DEBUG] Manual pass clicked");
     if(confirm("Skip your turn?")) {
         currentHand = [null, null, null];
         ws.send(JSON.stringify({type: 'pass_turn'}));
     }
 }
 function checkTurnTimer() {
-    if (!turnStartTime || !isPlaying) return;
+    if (!turnStartTime) return;
     const now = Date.now() / 1000;
     const diff = now - turnStartTime;
     const skipBtn = document.getElementById('vote-skip-btn');
@@ -249,17 +190,10 @@ function updateButtons() {
     else selfSkipBtn.style.display = 'none';
 }
 
-window.voteReset = function() { console.log("[DEBUG] Vote Reset clicked"); ws.send(JSON.stringify({type: 'vote_reset'})); };
-window.voteSkip = function() { console.log("[DEBUG] Vote Skip clicked"); ws.send(JSON.stringify({type: 'vote_skip'})); };
-window.exitGame = function() {
-    console.log("[DEBUG] Exit Game clicked");
-    if(confirm("退出しますか？")) {
-        if (ws) { ws.close(); ws = null; }
-        location.reload();
-    }
-};
+window.voteReset = function() { ws.send(JSON.stringify({type: 'vote_reset'})); };
+window.voteSkip = function() { ws.send(JSON.stringify({type: 'vote_skip'})); };
+window.exitGame = function() { if(confirm("退出しますか？")) { if (ws) { ws.close(); ws = null; } location.reload(); } };
 
-// 描画クラスなど (変更なし)
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }

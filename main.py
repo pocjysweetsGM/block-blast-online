@@ -4,7 +4,7 @@ import json
 import asyncio
 import time
 import os
-import traceback # エラー詳細表示用
+import traceback
 
 app = FastAPI()
 
@@ -30,8 +30,6 @@ class GameRoom:
         self.names: dict[int, str] = {}
         
         self.current_turn: int = 0
-        self.host_id: int = 0
-        self.is_playing: bool = False
         self.total_turns_taken: int = 0
         self.MAX_ROUNDS: int = 100
 
@@ -72,21 +70,13 @@ MAX_PLAYERS_PER_ROOM = 10
 
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str = ""):
-    # --- 接続処理 ---
     if room_id not in rooms:
         rooms[room_id] = GameRoom()
-        print(f"[DEBUG] Room created: {room_id}")
     room = rooms[room_id]
 
     if len(room.active_connections) >= MAX_PLAYERS_PER_ROOM:
         await websocket.accept()
         await websocket.send_json({"type": "error", "message": "満員です"})
-        await websocket.close()
-        return
-    
-    if room.is_playing:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "ゲーム進行中です"})
         await websocket.close()
         return
 
@@ -102,7 +92,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     else:
         final_name = nickname.strip()
     
-    # 名前重複回避
     existing_names = set(room.names.values())
     original_name = final_name
     count = 2
@@ -114,20 +103,21 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     room.scores[current_player_id] = 0
     room.names[current_player_id] = final_name
 
-    if len(room.active_connections) == 1 or room.host_id == 0:
-        room.host_id = current_player_id
-        print(f"[DEBUG] New Host assigned: {final_name} (ID: {current_player_id})")
-
-    print(f"[DEBUG] {final_name} connected to {room_id}")
+    # 最初の1人ならその人のターンにする（即ゲーム開始）
+    if len(room.active_connections) == 1:
+        room.current_turn = current_player_id
+        room.turn_start_time = time.time()
+    # 2人目以降が入ってきたとき、もし誰もターンを持っていない状態なら（バグ防止）、最初のIDに渡す
+    elif room.current_turn == 0:
+        room.current_turn = sorted(list(room.active_connections.values()))[0]
+        room.turn_start_time = time.time()
 
     await websocket.send_json({
         "type": "welcome",
         "your_id": current_player_id,
         "your_name": final_name,
         "board": room.board,
-        "room_id": room_id,
-        "host_id": room.host_id,
-        "is_playing": room.is_playing
+        "room_id": room_id
     })
 
     async def broadcast_room_state():
@@ -150,8 +140,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             "turn_start_time": room.turn_start_time,
             "skip_votes": list(room.skip_votes),
             "reset_votes": list(room.reset_votes),
-            "host_id": room.host_id,
-            "is_playing": room.is_playing,
             "round_info": f"{current_round}/{room.MAX_ROUNDS}"
         }
         await room.broadcast(message)
@@ -163,58 +151,35 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         if player_count == 0: return
 
         if len(room.reset_votes) >= player_count:
-            print("[DEBUG] Reset vote passed")
             room.board = [[0] * 8 for _ in range(8)]
             for pid in room.scores: room.scores[pid] = 0
             room.reset_votes.clear()
             room.skip_votes.clear()
             room.total_turns_taken = 0
+            
+            # ターンをリセット（最初のIDの人へ）
+            if room.active_connections:
+                room.current_turn = sorted(list(room.active_connections.values()))[0]
+                room.turn_start_time = time.time()
+            
             await room.broadcast({"type": "init", "board": room.board})
             await broadcast_room_state()
             return
 
         required_skips = max(1, player_count - 1)
         if len(room.skip_votes) >= required_skips:
-            print("[DEBUG] Skip vote passed")
             room.rotate_turn()
             await broadcast_room_state()
 
     try:
         while True:
             data = await websocket.receive_text()
-            # print(f"[DEBUG] Received Raw Data: {data}") # 通信量が多すぎる場合はコメントアウト
-
-            # ★★★ここから: 絶対にサーバーを落とさないための防御ブロック★★★
+            
             try:
                 message = json.loads(data)
                 msg_type = message.get("type")
 
-                if msg_type == "start_game":
-                    print(f"[DEBUG] Start Game requested by ID: {current_player_id}")
-                    if current_player_id == room.host_id:
-                        print("[DEBUG] Host verified. Starting game...")
-                        room.total_turns_taken = 0
-                        room.is_playing = True
-                        room.current_turn = room.host_id
-                        room.turn_start_time = time.time()
-                        await broadcast_room_state()
-                    else:
-                        print(f"[DEBUG] Start ignored. Not host. (Host is {room.host_id})")
-
-                elif msg_type == "kick_player":
-                    if current_player_id == room.host_id:
-                        target_id = message.get("target_id")
-                        print(f"[DEBUG] Kick requested for ID: {target_id}")
-                        target_ws = None
-                        for ws, pid in list(room.active_connections.items()):
-                            if pid == target_id:
-                                target_ws = ws
-                                break
-                        if target_ws:
-                            await target_ws.send_json({"type": "error", "message": "ホストによりキックされました"})
-                            await target_ws.close() 
-
-                elif msg_type == "batch_update":
+                if msg_type == "batch_update":
                     if room.current_turn != current_player_id: continue
 
                     updates = message["updates"]
@@ -258,11 +223,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         current_round = (room.total_turns_taken // player_count) + 1
                         
                         if current_round > room.MAX_ROUNDS:
-                            print("[DEBUG] Max rounds reached. Game Over.")
-                            room.is_playing = False
                             await room.broadcast({"type": "game_over", "ranking": []})
-                            room.current_turn = 0
-                            room.total_turns_taken = 0
+                            # ゲームオーバー後もリセットされるまでそのまま待機、もしくは自動リセット
+                            # 今回はそのまま
                         else:
                             room.rotate_turn()
                             await broadcast_room_state()
@@ -280,13 +243,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         await broadcast_room_state()
                         await check_votes_and_execute()
             
-            except Exception as e:
-                # ★エラーが起きてもここでキャッチし、サーバーダウンを防ぐ
-                print(f"[ERROR] Error processing message from {current_player_id}: {e}")
-                traceback.print_exc() # エラー詳細をログに出す
+            except Exception:
+                traceback.print_exc()
 
     except WebSocketDisconnect:
-        print(f"[DEBUG] Disconnect: {current_player_id}")
         if websocket in room.active_connections:
             del room.active_connections[websocket]
         if current_player_id in room.scores:
@@ -297,20 +257,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         if current_player_id in room.skip_votes: room.skip_votes.remove(current_player_id)
         if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
 
-        if room.host_id == current_player_id:
-            if room.active_connections:
-                new_host = sorted(room.active_connections.values())[0]
-                room.host_id = new_host
-                print(f"[DEBUG] Host migrated to ID: {new_host}")
-            else:
-                room.host_id = 0
-
         if room.current_turn == current_player_id:
             room.rotate_turn()
 
         if len(room.active_connections) == 0:
             del rooms[room_id]
-            print(f"[DEBUG] Room {room_id} deleted (empty)")
         else:
             await broadcast_room_state()
             await check_votes_and_execute()

@@ -93,6 +93,8 @@ let prevSkipVotesLen = 0;
 let remoteDrags = {};
 let comboCount = 0;
 let lastClearTurnId = -1;
+// ★修正: 重複していた変数を1つに統一（ファイルの先頭近くで宣言するのがベストですが、ロジックの近くでもOK）
+let lastSentTime = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -169,6 +171,7 @@ function canPlaceAfterClear(shapeToCheck) {
     for (let r = 0; r < BOARD_SIZE; r++) { for (let c = 0; c < BOARD_SIZE; c++) { if (canFit(shapeToCheck, r, c, simBoard)) return true; } }
     return false;
 }
+
 async function triggerAutoPass() {
     const overlay = document.getElementById('pass-overlay');
     overlay.classList.add('active');
@@ -179,26 +182,29 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
+// --- 通信関連 ---
 function startGame() {
-    sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
     const nameInput = document.getElementById('nameInput').value.trim();
     if (!roomInput) { document.getElementById('error-msg').innerText = "合言葉を入力してください"; return; }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
+    
     if (ws) ws.close();
     ws = new WebSocket(url);
+
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
         document.getElementById('room-info').innerText = `Room: ${roomInput.toUpperCase()}`;
-        // ★開始時に手札を確実に入れる
+        // ★初期化時にも手札を補充
         if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         draw();
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
+
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -207,7 +213,6 @@ function startGame() {
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
             updateBoard(data.board);
-            // ★Welcome受信時にも手札補充
             if(currentHand.length === 0 || currentHand.every(s=>s===null)) refillHand();
         }
         else if (data.type === "game_state") {
@@ -219,20 +224,18 @@ function startGame() {
             currentSkipVotes = data.skip_votes;
             currentResetVotes = data.reset_votes;
             hostId = data.host_id;
-            isClearing = data.is_clearing; 
-            
+            isClearing = data.is_clearing;
             document.getElementById('turn-count-info').innerText = `Round: ${data.round_info}`;
             updateTurnDisplay(data.ranking);
             updateRanking(data.ranking);
             updateButtons();
             updateVotePopup();
             
-            // ★重要変更: 誰のターンかに関わらず、手札が空なら補充する
+            // 手札補充
             if (currentHand.length === 0 || currentHand.every(s => s === null)) {
                 refillHand();
             }
             
-            // 自分のターンの時だけ詰み判定
             if (currentTurnId === myPlayerId && !isClearing) {
                 if (!checkCanPlace()) triggerAutoPass();
             }
@@ -268,15 +271,12 @@ function startGame() {
     ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
 
-// 手動スキップ
 function manualPass() {
     showModal("SKIP TURN", "本当にスキップしますか？", () => {
-        // 手札をクリアするが、即座にgame_stateが来てrefillされる
         currentHand = [null, null, null];
         ws.send(JSON.stringify({type: 'pass_turn'}));
     }, true);
 }
-
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000; const diff = now - turnStartTime;
@@ -286,7 +286,6 @@ function checkTurnTimer() {
 function updateButtons() {
     const resetBtn = document.getElementById('reset-btn');
     if (currentResetVotes.includes(myPlayerId)) resetBtn.classList.add('voted'); else resetBtn.classList.remove('voted');
-
     const skipBtn = document.getElementById('action-skip-btn');
     const skipIcon = document.getElementById('skip-icon');
     if (currentTurnId === myPlayerId) {
@@ -341,9 +340,6 @@ function updateRanking(rankingData) {
     }); 
 }
 
-// 通信頻度スロットル
-let lastSentTime = 0;
-
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
     const theme = THEMES[currentTheme];
@@ -363,7 +359,6 @@ function draw() {
     }
     ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1;
 
-    // ゴースト
     for (let pid in remoteDrags) {
         const d = remoteDrags[pid]; const shape = SHAPES[d.shape_idx]; ctx.fillStyle = theme.remoteGhost;
         for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect((d.col + c) * CELL_SIZE, (d.row + r) * CELL_SIZE, CELL_SIZE, CELL_SIZE); } } }
@@ -390,44 +385,44 @@ function draw() {
 
 function drawHand(theme) {
     const slotWidth = 400 / 3;
-    const slotCenterY = HAND_START_Y + (190 / 2); // HAND_HEIGHT=190
+    const slotCenterY = HAND_START_Y + (190 / 2);
 
     currentHand.forEach((shape, index) => {
         if (shape === null) return;
         const slotCenterX = (index * slotWidth) + (slotWidth / 2);
-        
-        // 30px基準でのピクセルサイズ
         const originalW = shape[0].length * 30;
         const originalH = shape.length * 30;
-        
         const maxSlotSize = slotWidth * 0.8;
         let scale = 1.0;
         if (originalW > maxSlotSize || originalH > maxSlotSize) {
             scale = maxSlotSize / Math.max(originalW, originalH);
         }
-
         const drawW = originalW * scale;
         const drawH = originalH * scale;
         const blockSize = 30 * scale;
 
         if (index === draggingIdx) {
-            drawShape(shape, dragX, dragY, 50, 'rgba(52, 152, 219, 0.7)');
+            // ★修正: ここでthemeを渡す！
+            drawShape(shape, dragX, dragY, CELL_SIZE, 'rgba(52, 152, 219, 0.7)', theme);
         } else {
             const color = (currentTurnId === myPlayerId && !isClearing) ? theme.blockColor : theme.inactiveHand;
-            drawShape(shape, slotCenterX - drawW/2, slotCenterY - drawH/2, blockSize, color);
+            drawShape(shape, slotCenterX - drawW/2, slotCenterY - drawH/2, blockSize, color, theme);
         }
     });
 }
 
-function drawShape(shape, startX, startY, size, color) {
+function drawShape(shape, startX, startY, size, color, theme) {
     ctx.fillStyle = color;
     for(let r = 0; r < shape.length; r++) {
         for(let c = 0; c < shape[r].length; c++) {
             if(shape[r][c] === 1) {
                 ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2);
-                ctx.fillStyle = 'rgba(255,255,255,0.4)';
-                ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
-                ctx.fillStyle = color;
+                // ★修正: themeがあるかチェック (ドラッグ中もthemeを渡すようにしたので安全)
+                if (theme && theme.blockGloss) {
+                    ctx.fillStyle = theme.blockGloss;
+                    ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
+                    ctx.fillStyle = color;
+                }
             }
         }
     }

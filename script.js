@@ -1,3 +1,4 @@
+/* script.js */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
@@ -10,25 +11,18 @@ const THEMES = {
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-// ★デフォルト: ダーク
-let currentTheme = 'dark';
+let currentTheme = 'light'; 
 
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
-        // ★ON = Light
-        currentTheme = 'light'; 
-        document.body.classList.add('light-mode'); 
-        document.getElementById('mode-label').innerText = "Light Mode"; 
+        currentTheme = 'dark'; document.body.classList.add('dark-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; 
     } else { 
-        // ★OFF = Dark
-        currentTheme = 'dark'; 
-        document.body.classList.remove('light-mode'); 
-        document.getElementById('mode-label').innerText = "Dark Mode"; 
+        currentTheme = 'light'; document.body.classList.remove('dark-mode'); document.getElementById('mode-label').innerText = "Light Mode"; 
     }
     draw();
 }
 
-// (以下、クラスやゲームロジックは前回の完全版と同じです。省略せずにすべてコピーしてください)
+// SoundManager (変更なし)
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -205,7 +199,6 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
-// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -235,7 +228,6 @@ function startGame() {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             
-            // ★設定パネル表示 (Host かつ まだ始まってない場合)
             const overlay = document.getElementById('setup-overlay');
             if (!data.is_playing) {
                 overlay.style.display = 'flex';
@@ -247,7 +239,7 @@ function startGame() {
                     document.getElementById('setup-waiting-msg').style.display = 'block';
                 }
             } else {
-                overlay.style.display = 'none'; // 途中参加
+                overlay.style.display = 'none'; 
             }
 
             if(data.restored) showModal("WELCOME BACK", "スコアを復元しました！");
@@ -266,12 +258,19 @@ function startGame() {
             currentResetVotes = data.reset_votes;
             hostId = data.host_id;
             isClearing = data.is_clearing;
-            document.getElementById('turn-count-info').innerText = `Round: ${data.round_info}`;
             
-            // ★ランキング更新処理
+            const roundText = document.getElementById('turn-count-info');
+            roundText.innerText = `Round: ${data.round_info}`;
+            
+            // ★最終ラウンド強調
+            if(data.is_final) {
+                roundText.classList.add('final-round');
+            } else {
+                roundText.classList.remove('final-round');
+            }
+            
             updateTurnDisplay(data.ranking);
             updateRanking(data.ranking);
-            
             updateButtons();
             updateVotePopup();
             
@@ -282,7 +281,7 @@ function startGame() {
             if (currentTurnId === myPlayerId && !isClearing && isPlaying) {
                 if (!checkCanPlace()) triggerAutoPass();
             }
-            isPlaying = data.is_playing; // 更新
+            isPlaying = data.is_playing; 
         }
         else if (data.type === "batch_update") {
             let cleared = false;
@@ -305,7 +304,6 @@ function startGame() {
         }
         else if (data.type === "init") updateBoard(data.board);
         
-        // ★ゲームオーバー演出呼び出し
         else if (data.type === "game_over") {
             showGameOver(data.ranking);
         }
@@ -313,13 +311,11 @@ function startGame() {
     ws.onclose = function() { if(timerInterval) clearInterval(timerInterval); };
 }
 
-// ★設定パネルからの開始
 function sendGameStart() {
     const rounds = document.getElementById('roundsInput').value;
     ws.send(JSON.stringify({type: 'start_game', max_rounds: rounds}));
 }
 
-// ★ゲームオーバー演出
 function showGameOver(ranking) {
     const screen = document.getElementById('result-screen');
     const title = document.getElementById('result-title');
@@ -422,31 +418,17 @@ function closeRankingModal(e) { if(e === null || e.target.id === 'ranking-modal'
 function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }
 function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p.name); const indicator = document.getElementById('turn-indicator'); const canvasEl = document.getElementById('gameCanvas'); if (currentTurnId === myPlayerId) { indicator.innerText = "YOUR TURN"; indicator.classList.add('my-turn'); canvasEl.classList.remove('inactive-canvas'); } else { const name = playerNames[currentTurnId] || `PLAYER ${currentTurnId}`; indicator.innerText = `TURN: ${name}`; indicator.classList.remove('my-turn'); canvasEl.classList.add('inactive-canvas'); } }
 
-// ★修正: ランキング表示関数
 function updateRanking(rankingData) { 
     const list = document.getElementById('score-list'); list.innerHTML = ""; 
     const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
-    
     rankingData.forEach((player, index) => { 
         const isMe = (player.id === myPlayerId); 
-        // ★修正: ターン中の人のハイライトはしない (リクエスト対応)
-        
         let text = player.name.toUpperCase(); 
-        // ★修正: 1位の人に王冠 (インデックス0が1位)
         if (index === 0) text = "👑 " + text;
-
         const li = document.createElement('li'); 
-        
-        // ★修正: 自分の行だけに highlight-me クラスをつける
-        if (isMe) {
-            li.className = "highlight-me"; 
-        }
-        
-        // ★修正: スコアにクラス追加
+        if (isMe) li.className = "highlight-me"; 
         li.innerHTML = `<span>${text}</span> <span class="rank-score">${player.score}</span>`; 
         list.appendChild(li); 
-        
-        // フルランキング用 (同じロジック)
         const fullLi = li.cloneNode(true); 
         if (myPlayerId === hostId && player.id !== myPlayerId) { 
             const kickBtn = document.createElement('button'); 

@@ -31,9 +31,12 @@ class GameRoom:
         
         self.current_turn: int = 0
         self.total_turns_taken: int = 0
-        self.MAX_ROUNDS: int = 100 # デフォルト
+        self.MAX_ROUNDS: int = 100
         self.host_id: int = 0
-        self.is_playing: bool = False # ゲーム開始前はFalse
+        
+        # ★初期状態は「ゲーム前」にする（設定画面を出すため）
+        self.is_playing: bool = False
+        self.is_clearing: bool = False
 
         self.turn_start_time: float = 0
         self.skip_votes: set[int] = set()
@@ -52,6 +55,7 @@ class GameRoom:
         self.skip_votes.clear()
         self.turn_start_time = time.time()
         self.total_turns_taken += 1
+        self.is_clearing = False
         
         if not self.active_connections:
             self.current_turn = 0
@@ -84,7 +88,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         await websocket.close()
         return
 
-    # ゲーム進行中の途中参加はOKとするが、設定画面は見せない
     await websocket.accept()
 
     used_ids = set(room.active_connections.values())
@@ -121,7 +124,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         all_ids = sorted(list(room.active_connections.values()))
         room.host_id = all_ids[0]
 
-    # ターン初期化
     all_ids = sorted(list(room.active_connections.values()))
     if room.current_turn == 0 or room.current_turn not in all_ids:
         if all_ids:
@@ -177,8 +179,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             room.reset_votes.clear()
             room.skip_votes.clear()
             room.total_turns_taken = 0
+            room.is_clearing = False
             room.disconnected_data.clear()
-            room.is_playing = False # リセットで待機状態に戻す
+            
+            # リセット後は再び設定画面（ゲーム前）に戻す
+            room.is_playing = False 
             
             ids = sorted(list(room.active_connections.values()))
             if ids:
@@ -201,7 +206,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                 message = json.loads(data)
                 msg_type = message.get("type")
 
-                # ★追加: ゲーム開始設定
                 if msg_type == "start_game":
                     if current_player_id == room.host_id:
                         try:
@@ -212,9 +216,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         
                         room.is_playing = True
                         room.total_turns_taken = 0
-                        room.current_turn = room.host_id # ホストからスタート
+                        room.current_turn = room.host_id
                         room.turn_start_time = time.time()
-                        # 全員に開始通知
                         await room.broadcast({"type": "game_start"})
                         await broadcast_room_state()
 
@@ -231,12 +234,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             await target_ws.close()
 
                 elif msg_type == "batch_update":
-                    if room.current_turn != current_player_id: continue
+                    if room.current_turn != current_player_id or room.is_clearing:
+                         continue
+
                     updates = message["updates"]
                     for item in updates:
                         r, c, v = item["row"], item["col"], item["value"]
                         if 0 <= r < 8 and 0 <= c < 8:
                             room.board[r][c] = v
+                    
                     await room.broadcast(message)
 
                     rows_to_clear = []
@@ -247,10 +253,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         if all(room.board[r][c] == 1 for r in range(8)): cols_to_clear.append(c)
 
                     if rows_to_clear or cols_to_clear:
+                        room.is_clearing = True
+                        await broadcast_room_state() 
+
                         lines_count = len(rows_to_clear) + len(cols_to_clear)
                         points = lines_count * 10
                         if current_player_id in room.scores:
                             room.scores[current_player_id] += points
+                        
                         await asyncio.sleep(0.3)
                         cleared_updates = []
                         for r in rows_to_clear:
@@ -261,7 +271,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             for r in range(8):
                                 room.board[r][c] = 0
                                 cleared_updates.append({"row": r, "col": c, "value": 0})
+                        
                         await room.broadcast({"type": "batch_update", "updates": cleared_updates})
+                        
+                        room.is_clearing = False
                         await broadcast_room_state()
 
                 elif msg_type == "end_turn" or msg_type == "pass_turn":
@@ -269,16 +282,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         player_count = len(room.active_connections)
                         current_round = (room.total_turns_taken // player_count) + 1
                         
-                        # ★ゲーム終了判定
                         if current_round > room.MAX_ROUNDS:
                             room.is_playing = False
-                            # 最終ランキングを作成して送信
                             final_ranking = []
                             for pid, score in room.scores.items():
                                 name = room.names.get(pid, f"Player {pid}")
                                 final_ranking.append({"id": pid, "name": name, "score": score})
                             final_ranking.sort(key=lambda x: x["score"], reverse=True)
-                            
                             await room.broadcast({"type": "game_over", "ranking": final_ranking})
                             room.total_turns_taken = 0
                             room.disconnected_data.clear()

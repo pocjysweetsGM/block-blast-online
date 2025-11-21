@@ -1,4 +1,3 @@
-/* script.js */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const CELL_SIZE = 50;
@@ -11,20 +10,20 @@ const THEMES = {
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-// ★修正: デフォルトをライトに
-let currentTheme = 'light'; 
+// ★デフォルト: ダーク
+let currentTheme = 'dark';
 
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
-        // ★ON = Dark
-        currentTheme = 'dark'; 
-        document.body.classList.add('dark-mode'); 
-        document.getElementById('mode-label').innerText = "Dark Mode"; 
-    } else { 
-        // ★OFF = Light
+        // ★ON = Light
         currentTheme = 'light'; 
-        document.body.classList.remove('dark-mode'); 
+        document.body.classList.add('light-mode'); 
         document.getElementById('mode-label').innerText = "Light Mode"; 
+    } else { 
+        // ★OFF = Dark
+        currentTheme = 'dark'; 
+        document.body.classList.remove('light-mode'); 
+        document.getElementById('mode-label').innerText = "Dark Mode"; 
     }
     draw();
 }

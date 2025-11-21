@@ -33,6 +33,7 @@
           placeholder="Nickname (Exact match to restore)"
           maxlength="10"
         />
+
         <div class="theme-switch-wrapper">
           <label class="theme-switch" for="checkbox">
             <input type="checkbox" id="checkbox" onchange="toggleTheme(this)" />
@@ -40,6 +41,7 @@
           </label>
           <span id="mode-label">Light Mode</span>
         </div>
+
         <button class="start-btn" onclick="startGame()">ENTER ROOM</button>
         <p id="error-msg"></p>
       </div>
@@ -57,7 +59,13 @@
             value="10"
             min="1"
             max="100"
-            style="width: 80px; font-size: 1.2em; margin: 10px"
+            style="
+              width: 80px;
+              font-size: 1.2em;
+              margin: 10px;
+              background: #222;
+              color: #fff;
+            "
           />
           <button class="start-btn" onclick="sendGameStart()">
             START GAME

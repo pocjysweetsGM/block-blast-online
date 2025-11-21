@@ -11,18 +11,21 @@ const THEMES = {
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-let currentTheme = 'light'; 
+// ★修正: デフォルトをDarkに戻す
+let currentTheme = 'dark'; 
 
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
-        currentTheme = 'dark'; document.body.classList.add('dark-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; 
+        // Checked = Light
+        currentTheme = 'light'; document.body.classList.add('light-mode'); document.getElementById('mode-label').innerText = "Light Mode"; 
     } else { 
-        currentTheme = 'light'; document.body.classList.remove('dark-mode'); document.getElementById('mode-label').innerText = "Light Mode"; 
+        // Unchecked = Dark
+        currentTheme = 'dark'; document.body.classList.remove('light-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; 
     }
     draw();
 }
 
-// SoundManager (変更なし)
+// SoundManager (同じ)
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -97,7 +100,6 @@ let voteNotificationTimer = null;
 let prevSkipVotesLen = 0;
 let comboCount = 0;
 let lastClearTurnId = -1;
-let lastSentTime = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -199,6 +201,7 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
+// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -261,13 +264,8 @@ function startGame() {
             
             const roundText = document.getElementById('turn-count-info');
             roundText.innerText = `Round: ${data.round_info}`;
-            
-            // ★最終ラウンド強調
-            if(data.is_final) {
-                roundText.classList.add('final-round');
-            } else {
-                roundText.classList.remove('final-round');
-            }
+            if(data.is_final) roundText.classList.add('final-round');
+            else roundText.classList.remove('final-round');
             
             updateTurnDisplay(data.ranking);
             updateRanking(data.ranking);
@@ -303,7 +301,6 @@ function startGame() {
             }
         }
         else if (data.type === "init") updateBoard(data.board);
-        
         else if (data.type === "game_over") {
             showGameOver(data.ranking);
         }
@@ -352,6 +349,23 @@ function showGameOver(ranking) {
     }
 }
 
+// ★修正: ボタンクリック時の処理
+function handleSkipAction() {
+    sound.playButton();
+    const now = Date.now() / 1000;
+    const diff = now - turnStartTime;
+    
+    if (currentTurnId === myPlayerId) {
+        // 自分のターン: いつでもスキップ可能
+        manualPass();
+    } else {
+        // 他人のターン: 60秒経過後のみ投票可能
+        if (diff > 60) {
+            ws.send(JSON.stringify({type: 'vote_skip'}));
+        }
+    }
+}
+
 function manualPass() {
     showModal("SKIP TURN", "本当にスキップしますか？", () => {
         currentHand = [null, null, null];
@@ -362,13 +376,9 @@ function manualPass() {
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000; const diff = now - turnStartTime;
-    const skipBtn = document.getElementById('vote-skip-btn');
+    const skipBtn = document.getElementById('action-skip-btn'); // ★ID修正
     if (skipBtn) {
-        if (currentTurnId !== myPlayerId && diff > 60 && totalPlayers > 1) { 
-            skipBtn.style.display = 'flex'; 
-        } else { 
-            skipBtn.style.display = 'none'; 
-        }
+        updateButtons(); // ボタンの状態を更新
     }
 }
 
@@ -378,18 +388,30 @@ function updateButtons() {
 
     const skipBtn = document.getElementById('action-skip-btn');
     const skipIcon = document.getElementById('skip-icon');
+    
     if (currentTurnId === myPlayerId) {
-        skipBtn.className = 'icon-btn self-skip'; skipIcon.innerText = 'skip_next'; skipBtn.disabled = false;
+        // 自分のターン: スキップボタン
+        skipBtn.className = 'icon-btn self-skip'; 
+        skipIcon.innerText = 'skip_next'; 
+        skipBtn.disabled = false;
     } else {
-        const now = Date.now() / 1000; const diff = now - turnStartTime;
+        // 他人のターン: 投票ボタン
+        const now = Date.now() / 1000; 
+        const diff = now - turnStartTime;
+        
         if (diff > 60 && totalPlayers > 1) {
-            skipBtn.disabled = false; skipIcon.innerText = 'gavel';
-            if (currentSkipVotes.includes(myPlayerId)) skipBtn.className = 'icon-btn voted'; else skipBtn.className = 'icon-btn vote-active';
+            skipBtn.disabled = false; 
+            skipIcon.innerText = 'gavel';
+            if (currentSkipVotes.includes(myPlayerId)) skipBtn.className = 'icon-btn voted'; 
+            else skipBtn.className = 'icon-btn vote-active';
         } else {
-            skipBtn.className = 'icon-btn vote-wait'; skipIcon.innerText = 'gavel'; skipBtn.disabled = true;
+            skipBtn.className = 'icon-btn vote-wait'; 
+            skipIcon.innerText = 'gavel'; 
+            skipBtn.disabled = true;
         }
     }
 }
+
 function updateVotePopup() {
     const popup = document.getElementById('vote-status-popup');
     const countDisplay = document.getElementById('vote-count-display');
@@ -574,6 +596,7 @@ function handleEnd(e) {
         draggingIdx = -1;
     }
 }
+let lastSentTime = 0;
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
 
 // ★初期化時にも手札を作る

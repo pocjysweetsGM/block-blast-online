@@ -1,15 +1,18 @@
 /* style.css */
 :root {
+  /* ★デフォルト: ダークモード */
   --bg-gradient: linear-gradient(135deg, #1a2a3a 0%, #0a1520 100%);
   --text-color: #ecf0f1;
   --panel-bg: rgba(30, 45, 60, 0.9);
   --panel-border: rgba(70, 90, 110, 0.3);
   --input-bg: #2c3e50;
   --input-border: #34495e;
-  --accent-color: #f1c40f;
+  --accent-color: #f1c40f; /* 黄色 */
   --canvas-border: #34495e;
   --shadow: rgba(0, 0, 0, 0.4);
 }
+
+/* ★スイッチON: ライトモード */
 body.light-mode {
   --bg-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   --text-color: #2c3e50;
@@ -17,10 +20,11 @@ body.light-mode {
   --panel-border: rgba(200, 200, 200, 0.5);
   --input-bg: #ffffff;
   --input-border: #bdc3c7;
-  --accent-color: #e67e22;
+  --accent-color: #e67e22; /* オレンジ */
   --canvas-border: #bdc3c7;
   --shadow: rgba(0, 0, 0, 0.1);
 }
+
 body {
   display: flex; flex-direction: column; justify-content: center; align-items: center;
   min-height: 100vh; margin: 0; background: var(--bg-gradient);
@@ -98,15 +102,9 @@ button.start-btn { padding: 14px 50px; font-size: 1.3em; font-weight: bold; marg
 #score-list li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed var(--panel-border); padding: 3px 0; color: white; }
 #score-list li:nth-child(n+5) { display: none; }
 #rank-hint { font-size: 0.7em; text-align: center; opacity: 0.7; margin-top: 2px; display: block; }
-.highlight-me { background-color: rgba(46, 204, 113, 0.2); border: 1px solid #f1c40f; border-radius: 4px; padding: 2px 5px !important; color: #2ecc71 !important; font-weight: bold; }
+.highlight-me { background-color: rgba(46, 204, 113, 0.2); border: 1px solid #2ecc71; border-radius: 4px; padding: 2px 5px !important; color: #2ecc71 !important; font-weight: bold; }
 .rank-score { color: #f1c40f; font-weight: bold; }
-
-/* ★最終ラウンド用のスタイル */
-.final-round {
-    color: #e74c3c !important;
-    font-weight: bold;
-    animation: blink 1s infinite;
-}
+.final-round { color: #e74c3c !important; font-weight: bold; animation: blink 1s infinite; }
 @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
 @media (max-width: 600px) {

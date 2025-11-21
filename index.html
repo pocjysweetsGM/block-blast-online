@@ -30,7 +30,7 @@
         <input
           type="text"
           id="nameInput"
-          placeholder="Nickname (Exact match to restore)"
+          placeholder="Nickname (Optional)"
           maxlength="10"
         />
 
@@ -39,9 +39,8 @@
             <input type="checkbox" id="checkbox" onchange="toggleTheme(this)" />
             <div class="slider round"></div>
           </label>
-          <span id="mode-label">Light Mode</span>
+          <span id="mode-label">Dark Mode</span>
         </div>
-
         <button class="start-btn" onclick="startGame()">ENTER ROOM</button>
         <p id="error-msg"></p>
       </div>
@@ -112,6 +111,7 @@
               >
                 <span class="material-icons" id="skip-icon">skip_next</span>
               </button>
+
               <button
                 id="reset-btn"
                 class="icon-btn"
@@ -120,6 +120,7 @@
               >
                 <span class="material-icons">refresh</span>
               </button>
+
               <button
                 id="exit-btn"
                 class="icon-btn exit"

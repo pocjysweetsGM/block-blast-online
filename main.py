@@ -34,12 +34,15 @@ class GameRoom:
         self.MAX_ROUNDS: int = 100
         self.host_id: int = 0
         self.is_playing: bool = False
+        self.is_clearing: bool = False
 
         self.turn_start_time: float = 0
         self.skip_votes: set[int] = set()
         self.reset_votes: set[int] = set()
         
         self.disconnected_data: dict[str, dict] = {}
+        # 名前なし(ゲスト)のIDリスト
+        self.guest_ids: set[int] = set()
 
     async def broadcast(self, message: dict):
         for connection in list(self.active_connections.keys()):
@@ -52,13 +55,14 @@ class GameRoom:
         self.skip_votes.clear()
         self.turn_start_time = time.time()
         self.total_turns_taken += 1
+        self.is_clearing = False
         
         if not self.active_connections:
             self.current_turn = 0
             return
 
         ids = sorted(list(self.active_connections.values()))
-        if self.current_turn == 0:
+        if self.current_turn == 0 or self.current_turn not in ids:
             self.current_turn = ids[0]
             return
 
@@ -91,22 +95,33 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     while current_player_id in used_ids:
         current_player_id += 1
     
-    target_name = nickname.strip()
-    if not target_name:
-        target_name = f"Player {current_player_id}"
-    
-    existing_names = set(room.names.values())
-    final_name = target_name
-    count = 2
-    while final_name in existing_names:
-        final_name = f"{target_name} {count}"
-        count += 1
+    input_name = nickname.strip()
+    final_name = ""
+    is_guest = False
 
+    if not input_name:
+        # 名前なし -> ゲスト扱い (Player N)
+        final_name = f"Player {current_player_id}"
+        is_guest = True
+    else:
+        # 名前あり -> 重複チェック
+        if input_name in room.names.values():
+            # すでにいる人と同じ名前ならエラーで弾く
+            await websocket.send_json({"type": "error", "message": "その名前は既に使用されています"})
+            await websocket.close()
+            return
+        final_name = input_name
+        is_guest = False
+
+    # 登録
     room.active_connections[websocket] = current_player_id
     room.names[current_player_id] = final_name
+    if is_guest:
+        room.guest_ids.add(current_player_id)
     
+    # 復元ロジック (ゲスト以外のみ)
     restored = False
-    if final_name in room.disconnected_data:
+    if not is_guest and final_name in room.disconnected_data:
         saved_data = room.disconnected_data[final_name]
         room.scores[current_player_id] = saved_data['score']
         if saved_data['was_host']:
@@ -116,10 +131,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     else:
         room.scores[current_player_id] = 0
 
+    # ホスト選定
     if room.host_id == 0 or room.host_id not in room.active_connections.values():
         all_ids = sorted(list(room.active_connections.values()))
         room.host_id = all_ids[0]
 
+    # ターン初期化
     all_ids = sorted(list(room.active_connections.values()))
     if room.current_turn == 0 or room.current_turn not in all_ids:
         if all_ids:
@@ -145,13 +162,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         ranking.sort(key=lambda x: x["score"], reverse=True)
 
         player_count = len(room.active_connections)
-        # ★修正: ラウンド計算を0始まりに変更
-        current_round = 0
+        current_round = 1
         if player_count > 0:
-            current_round = room.total_turns_taken // player_count
-        
-        # ★追加: 最終ラウンド判定 (設定上限 - 1 が最終)
-        is_final = (current_round == room.MAX_ROUNDS - 1)
+            current_round = (room.total_turns_taken // player_count) + 1
 
         message = {
             "type": "game_state",
@@ -162,9 +175,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             "skip_votes": list(room.skip_votes),
             "reset_votes": list(room.reset_votes),
             "host_id": room.host_id,
-            "is_playing": room.is_playing,
             "round_info": f"{current_round}/{room.MAX_ROUNDS}",
-            "is_final": is_final # ★クライアントに通知
+            "is_clearing": room.is_clearing,
+            "is_final": (current_round == room.MAX_ROUNDS)
         }
         await room.broadcast(message)
 
@@ -180,8 +193,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
             room.reset_votes.clear()
             room.skip_votes.clear()
             room.total_turns_taken = 0
-            room.disconnected_data.clear()
-            room.is_playing = False 
+            room.is_clearing = False
+            room.disconnected_data.clear() # リセットで保存データも消去
             
             ids = sorted(list(room.active_connections.values()))
             if ids:
@@ -232,7 +245,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             await target_ws.close()
 
                 elif msg_type == "batch_update":
-                    if room.current_turn != current_player_id: continue
+                    if room.current_turn != current_player_id or room.is_clearing:
+                         continue
+
                     updates = message["updates"]
                     for item in updates:
                         r, c, v = item["row"], item["col"], item["value"]
@@ -249,6 +264,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                         if all(room.board[r][c] == 1 for r in range(8)): cols_to_clear.append(c)
 
                     if rows_to_clear or cols_to_clear:
+                        room.is_clearing = True
+                        await broadcast_room_state()
+
                         lines_count = len(rows_to_clear) + len(cols_to_clear)
                         points = lines_count * 10
                         if current_player_id in room.scores:
@@ -266,18 +284,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                                 cleared_updates.append({"row": r, "col": c, "value": 0})
                         
                         await room.broadcast({"type": "batch_update", "updates": cleared_updates})
+                        room.is_clearing = False
                         await broadcast_room_state()
 
                 elif msg_type == "end_turn" or msg_type == "pass_turn":
                     if room.current_turn == current_player_id:
-                        # ターンを進める
-                        room.rotate_turn()
-                        
-                        # ★修正: 終了判定 (総ターン数 >= 人数 * 最大ラウンド)
                         player_count = len(room.active_connections)
-                        total_limit = player_count * room.MAX_ROUNDS
+                        current_round = (room.total_turns_taken // player_count) + 1
                         
-                        if room.total_turns_taken >= total_limit:
+                        if current_round > room.MAX_ROUNDS:
                             room.is_playing = False
                             final_ranking = []
                             for pid, score in room.scores.items():
@@ -288,9 +303,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             await room.broadcast({"type": "game_over", "ranking": final_ranking})
                             room.total_turns_taken = 0
                             room.disconnected_data.clear()
-                        
-                        # 状態更新 (終了しててもしてなくても送る)
-                        await broadcast_room_state()
+                        else:
+                            room.rotate_turn()
+                            await broadcast_room_state()
                 
                 elif msg_type == "vote_reset":
                     if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
@@ -315,11 +330,16 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
     except WebSocketDisconnect:
         if websocket in room.active_connections:
-            room.disconnected_data[final_name] = {
-                'score': room.scores.get(current_player_id, 0),
-                'was_host': (room.host_id == current_player_id)
-            }
+            # ★変更: ゲストでない場合のみ保存
+            is_guest = (current_player_id in room.guest_ids)
+            if not is_guest:
+                room.disconnected_data[final_name] = {
+                    'score': room.scores.get(current_player_id, 0),
+                    'was_host': (room.host_id == current_player_id)
+                }
+            
             del room.active_connections[websocket]
+            if is_guest: room.guest_ids.remove(current_player_id)
         
         if current_player_id in room.scores: del room.scores[current_player_id]
         if current_player_id in room.names: del room.names[current_player_id]

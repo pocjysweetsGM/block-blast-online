@@ -6,24 +6,28 @@ const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
 const DRAG_OFFSET_Y = 80; 
 
-// ★重要: これが消えていたのがエラーの原因です
+// --- テーマ定義 ---
 const THEMES = {
     dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-// --- UIテーマ設定 (デフォルト: Dark) ---
-let currentTheme = 'dark'; 
+let currentTheme = 'dark'; // 初期値
 
+// ★修正: テーマ切り替え時に保存する
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
+        // ON = Light
         currentTheme = 'light'; 
         document.body.classList.add('light-mode'); 
         document.getElementById('mode-label').innerText = "Light Mode"; 
+        localStorage.setItem('appTheme', 'light'); // 保存
     } else { 
+        // OFF = Dark
         currentTheme = 'dark'; 
         document.body.classList.remove('light-mode'); 
         document.getElementById('mode-label').innerText = "Dark Mode"; 
+        localStorage.setItem('appTheme', 'dark'); // 保存
     }
     draw();
 }
@@ -74,7 +78,7 @@ function selectSkin(key) {
     draw();
 }
 
-// --- Sound Manager (シンプル版) ---
+// --- Sound Manager ---
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -259,7 +263,6 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
-// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -268,10 +271,8 @@ function startGame() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
-    
     if (ws) ws.close();
     ws = new WebSocket(url);
-
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
@@ -281,7 +282,6 @@ function startGame() {
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
-
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -289,7 +289,6 @@ function startGame() {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             
-            // ★修正: setup-overlay の存在チェック
             const overlay = document.getElementById('setup-overlay');
             if(overlay) {
                 if (!data.is_playing) {
@@ -435,12 +434,10 @@ function updateButtons() {
     const skipIcon = document.getElementById('skip-icon');
     
     if (currentTurnId === myPlayerId) {
-        // 自分のターン
         skipBtn.className = 'icon-btn self-skip'; 
         skipIcon.innerText = 'skip_next'; 
         skipBtn.disabled = false;
     } else {
-        // 他人のターン
         const now = Date.now() / 1000; 
         const diff = now - turnStartTime;
         
@@ -483,11 +480,9 @@ function openRankingModal() { sound.playButton(); document.getElementById('ranki
 function closeRankingModal(e) { if(e === null || e.target.id === 'ranking-modal') { sound.playButton(); document.getElementById('ranking-modal').style.display = 'none'; } }
 function updateBoard(newBoard) { for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) board[r][c] = newBoard[r][c]; }
 function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p.name); const indicator = document.getElementById('turn-indicator'); const canvasEl = document.getElementById('gameCanvas'); if (currentTurnId === myPlayerId) { indicator.innerText = "YOUR TURN"; indicator.classList.add('my-turn'); canvasEl.classList.remove('inactive-canvas'); } else { const name = playerNames[currentTurnId] || `PLAYER ${currentTurnId}`; indicator.innerText = `TURN: ${name}`; indicator.classList.remove('my-turn'); canvasEl.classList.add('inactive-canvas'); } }
-
 function updateRanking(rankingData) { 
     const list = document.getElementById('score-list'); list.innerHTML = ""; 
     const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
-    
     rankingData.forEach((player, index) => { 
         const isMe = (player.id === myPlayerId); 
         let text = player.name.toUpperCase(); 
@@ -585,7 +580,6 @@ function drawHand(skin, uiTheme) {
         if (index === draggingIdx) {
             drawShape(shape, dragX, dragY, CELL_SIZE, skin.block, skin.gloss);
         } else {
-            // 待機中 (グレーアウト判定)
             const color = (currentTurnId === myPlayerId && !isClearing) ? skin.block : uiTheme.inactiveHand;
             const gloss = (currentTurnId === myPlayerId && !isClearing) ? skin.gloss : null;
             drawShape(shape, slotCenterX - drawW/2, slotCenterY - drawH/2, blockSize, color, gloss);
@@ -659,11 +653,28 @@ function handleEnd(e) {
     }
 }
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
+
+// ★初期化処理: 保存されたテーマの復元
+if(localStorage.getItem('appTheme')) {
+    const saved = localStorage.getItem('appTheme');
+    const checkbox = document.getElementById('checkbox');
+    if(saved === 'light') {
+        currentTheme = 'light';
+        document.body.classList.add('light-mode');
+        document.getElementById('mode-label').innerText = "Light Mode";
+        if(checkbox) checkbox.checked = true;
+    } else {
+        currentTheme = 'dark';
+        document.body.classList.remove('light-mode');
+        document.getElementById('mode-label').innerText = "Dark Mode";
+        if(checkbox) checkbox.checked = false;
+    }
+}
+
+if(currentHand.length === 0) refillHand();
+
 // 入力フォームの効果音
 const roomInput = document.getElementById('roomInput');
 const nameInput = document.getElementById('nameInput');
 if(roomInput) { roomInput.addEventListener('click', () => sound.playType()); roomInput.addEventListener('input', () => sound.playType()); }
 if(nameInput) { nameInput.addEventListener('click', () => sound.playType()); nameInput.addEventListener('input', () => sound.playType()); }
-
-// ★初期化時にも手札を作る
-if(currentHand.length === 0) refillHand();

@@ -105,7 +105,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
         is_guest = True
     else:
         # 名前あり -> 重複チェック
-        # ★変更: 同名がいたらエラーで弾く
         if input_name in room.names.values():
             await websocket.send_json({"type": "error", "message": f"名前 '{input_name}' は既に使用されています。別の名前を使ってください。"})
             await websocket.close()
@@ -119,7 +118,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
     if is_guest:
         room.guest_ids.add(current_player_id)
     
-    # ★変更: ゲスト以外のみデータを復元
+    # ゲスト以外のみデータを復元
     restored = False
     if not is_guest and final_name in room.disconnected_data:
         saved_data = room.disconnected_data[final_name]
@@ -289,9 +288,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                 elif msg_type == "end_turn" or msg_type == "pass_turn":
                     if room.current_turn == current_player_id:
                         player_count = len(room.active_connections)
-                        current_round = (room.total_turns_taken // player_count) + 1
                         
-                        if current_round > room.MAX_ROUNDS:
+                        # ▼▼▼ 修正箇所 ▼▼▼
+                        # 次の総ターン数 (現在のターンが終わった後の状態)
+                        next_total_turns = room.total_turns_taken + 1
+                        # 最大許容ターン数 (人数 × ラウンド数)
+                        max_possible_turns = player_count * room.MAX_ROUNDS
+
+                        # `>=` を使うことで、最終ラウンドの最後の人が操作を終えた瞬間に終了します
+                        if next_total_turns >= max_possible_turns:
                             room.is_playing = False
                             final_ranking = []
                             for pid, score in room.scores.items():
@@ -303,8 +308,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
                             room.total_turns_taken = 0
                             room.disconnected_data.clear()
                         else:
+                            # まだ続くならターンを進める
                             room.rotate_turn()
                             await broadcast_room_state()
+                        # ▲▲▲ 修正ここまで ▲▲▲
                 
                 elif msg_type == "vote_reset":
                     if current_player_id in room.reset_votes: room.reset_votes.remove(current_player_id)
@@ -329,7 +336,6 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, nickname: str =
 
     except WebSocketDisconnect:
         if websocket in room.active_connections:
-            # ★変更: ゲストでない場合のみ保存
             is_guest = (current_player_id in room.guest_ids)
             if not is_guest:
                 room.disconnected_data[final_name] = {

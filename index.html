@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <title>Stack & Snatch - Online Puzzle Battle</title>
+    <title>Stack & Snatch</title>
     <link
       href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&display=swap"
       rel="stylesheet"
@@ -31,7 +31,7 @@
         <input
           type="text"
           id="nameInput"
-          placeholder="Nickname (Exact match to restore)"
+          placeholder="Nickname"
           maxlength="10"
         />
 
@@ -45,7 +45,7 @@
               />
               <div class="slider round"></div>
             </label>
-            <span id="mode-label">Dark UI</span>
+            <span id="mode-label">Dark Mode</span>
           </div>
           <button
             class="icon-btn skin-btn"
@@ -58,6 +58,36 @@
 
         <button class="start-btn" onclick="startGame()">ENTER ROOM</button>
         <p id="error-msg"></p>
+      </div>
+    </div>
+
+    <div id="setup-overlay" class="modal-overlay" style="display: none">
+      <div class="modal-content card-panel">
+        <h2>GAME SETUP</h2>
+        <div id="setup-waiting-msg">Waiting for host to start...</div>
+        <div id="setup-host-controls" style="display: none">
+          <p>Set Rounds to finish:</p>
+          <input
+            type="number"
+            id="roundsInput"
+            value="10"
+            min="1"
+            max="100"
+            style="
+              width: 80px;
+              font-size: 1.2em;
+              margin: 10px;
+              background: #222;
+              color: #fff;
+              border: 1px solid #555;
+              border-radius: 4px;
+              text-align: center;
+            "
+          />
+          <button class="start-btn" onclick="sendGameStart()">
+            START GAME
+          </button>
+        </div>
       </div>
     </div>
 

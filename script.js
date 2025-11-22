@@ -11,18 +11,27 @@ const THEMES = {
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-let currentTheme = 'light'; 
+// ★修正: デフォルトDark
+let currentTheme = 'dark'; 
 
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
-        currentTheme = 'dark'; document.body.classList.add('dark-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; 
+        // ON = Light
+        currentTheme = 'light'; 
+        document.body.classList.add('light-mode'); 
+        document.getElementById('mode-label').innerText = "Light Mode"; 
+        localStorage.setItem('appTheme', 'light');
     } else { 
-        currentTheme = 'light'; document.body.classList.remove('dark-mode'); document.getElementById('mode-label').innerText = "Light Mode"; 
+        // OFF = Dark
+        currentTheme = 'dark'; 
+        document.body.classList.remove('light-mode'); 
+        document.getElementById('mode-label').innerText = "Dark Mode"; 
+        localStorage.setItem('appTheme', 'dark');
     }
     draw();
 }
 
-// SoundManager (省略せずそのまま)
+// (SoundManagerなどは変更なし)
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -46,6 +55,7 @@ class SoundManager {
         this._tone(freq, freq * 2, 0.3, 'triangle');
     }
     playButton() { this._tone(800, 800, 0.05, 'sine', 0.05); }
+    playType() { this._tone(2000, 500, 0.03, 'sawtooth', 0.05); }
     _tone(f1, f2, dur, type='sine', vol=0.1) {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
@@ -57,8 +67,6 @@ class SoundManager {
         osc.connect(gain); gain.connect(this.ctx.destination);
         osc.start(); osc.stop(this.ctx.currentTime + dur);
     }
-    // 入力音（キーボード）
-    playType() { this._tone(2000, 500, 0.03, 'sawtooth', 0.05); }
 }
 const sound = new SoundManager();
 
@@ -75,7 +83,14 @@ const SHAPES = [
     [[1, 0], [1, 1], [1, 0]], [[0, 1], [1, 1], [0, 1]],
     [[1, 1, 0], [0, 1, 1]], [[0, 1, 1], [1, 1, 0]],
     [[0, 1], [1, 1], [1, 0]], [[1, 0], [1, 1], [0, 1]],
-    [[1, 0], [0, 1]], [[0, 1], [1, 0]]
+    [[1, 0], [0, 1]], [[0, 1], [1, 0]],
+    [[1, 1, 1], [1, 0, 0], [1, 0, 0]], [[1, 1, 1], [0, 0, 1], [0, 0, 1]],
+    [[0, 0, 1], [0, 0, 1], [1, 1, 1]], [[1, 0, 0], [1, 0, 0], [1, 1, 1]],
+    [[1, 0], [0, 1]], [[0, 1], [1, 0]],
+    [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[0, 0, 1], [0, 1, 0], [1, 0, 0]],
+    [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
+    [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [1, 0, 1]],
+    [[1, 1], [1, 0], [1, 1]], [[1, 1], [0, 1], [1, 1]]
 ];
 
 let board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
@@ -100,6 +115,43 @@ let prevSkipVotesLen = 0;
 let comboCount = 0;
 let lastClearTurnId = -1;
 let lastSentTime = 0;
+let currentSkinKey = 'classic';
+if(localStorage.getItem('blockSkin') && SKINS[localStorage.getItem('blockSkin')]) {
+    currentSkinKey = localStorage.getItem('blockSkin');
+}
+
+function openSkinModal() {
+    sound.playButton();
+    const list = document.getElementById('skin-list');
+    list.innerHTML = "";
+    for (const [key, skin] of Object.entries(SKINS)) {
+        const div = document.createElement('div');
+        div.className = `skin-item ${key === currentSkinKey ? 'selected' : ''}`;
+        div.onclick = () => selectSkin(key);
+        const preview = document.createElement('div');
+        preview.className = 'skin-preview';
+        preview.style.backgroundColor = skin.block;
+        const name = document.createElement('span');
+        name.className = 'skin-name';
+        name.innerText = skin.name;
+        div.appendChild(preview); div.appendChild(name);
+        list.appendChild(div);
+    }
+    document.getElementById('skin-modal').style.display = 'flex';
+}
+function closeSkinModal(e) {
+    if(e === null || e.target.id === 'skin-modal') {
+        sound.playButton();
+        document.getElementById('skin-modal').style.display = 'none';
+    }
+}
+function selectSkin(key) {
+    currentSkinKey = key;
+    localStorage.setItem('blockSkin', key);
+    sound.playPick();
+    openSkinModal();
+    draw();
+}
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -221,6 +273,7 @@ function startGame() {
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
+
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -300,11 +353,10 @@ function startGame() {
                 comboCount = 0; 
             }
         }
-        // ★修正: リセット受信時に手札もリセット＆通知
         else if (data.type === "init") {
             updateBoard(data.board);
-            refillHand(); // 手札補充
-            showModal("RESET", "Game has been reset!", null); // 通知
+            refillHand();
+            showModal("RESET", "Game has been reset!", null);
         }
         else if (data.type === "game_over") {
             showGameOver(data.ranking);
@@ -354,17 +406,17 @@ function showGameOver(ranking) {
     }
 }
 
-// ★修正: handleSkipAction の定義追加
+// ★修正: 欠けていた関数を定義
 function handleSkipAction() {
     sound.playButton();
     const now = Date.now() / 1000;
     const diff = now - turnStartTime;
     
     if (currentTurnId === myPlayerId) {
-        // 自分のターン
+        // 自分のターン: 即スキップ
         manualPass();
     } else {
-        // 他人のターン
+        // 他人のターン: 投票
         if (diff > 60) {
             ws.send(JSON.stringify({type: 'vote_skip'}));
         }
@@ -445,7 +497,6 @@ function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p
 function updateRanking(rankingData) { 
     const list = document.getElementById('score-list'); list.innerHTML = ""; 
     const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
-    
     rankingData.forEach((player, index) => { 
         const isMe = (player.id === myPlayerId); 
         let text = player.name.toUpperCase(); 
@@ -521,53 +572,6 @@ function draw() {
     for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); }
     requestAnimationFrame(draw);
 }
-
-// --- ブロックスキン ---
-const SKINS = {
-    classic: { name: "Classic Blue", block: '#3498db', gloss: 'rgba(255,255,255,0.2)', ghost: 'rgba(52, 152, 219, 0.3)', highlight: 'rgba(46, 204, 113, 0.5)' },
-    magma: { name: "Magma Red", block: '#e74c3c', gloss: 'rgba(255,200,200,0.3)', ghost: 'rgba(231, 76, 60, 0.3)', highlight: 'rgba(241, 196, 15, 0.5)' },
-    forest: { name: "Forest Green", block: '#27ae60', gloss: 'rgba(200,255,200,0.2)', ghost: 'rgba(46, 204, 113, 0.3)', highlight: 'rgba(243, 156, 18, 0.5)' },
-    cyber: { name: "Cyber Pink", block: '#e056fd', gloss: 'rgba(255,255,255,0.4)', ghost: 'rgba(224, 86, 253, 0.3)', highlight: 'rgba(0, 206, 201, 0.5)' },
-    mono: { name: "Monochrome", block: '#7f8c8d', gloss: 'rgba(255,255,255,0.1)', ghost: 'rgba(127, 140, 141, 0.3)', highlight: 'rgba(44, 62, 80, 0.5)' }
-};
-let currentSkinKey = 'classic';
-if(localStorage.getItem('blockSkin') && SKINS[localStorage.getItem('blockSkin')]) {
-    currentSkinKey = localStorage.getItem('blockSkin');
-}
-
-function openSkinModal() {
-    sound.playButton();
-    const list = document.getElementById('skin-list');
-    list.innerHTML = "";
-    for (const [key, skin] of Object.entries(SKINS)) {
-        const div = document.createElement('div');
-        div.className = `skin-item ${key === currentSkinKey ? 'selected' : ''}`;
-        div.onclick = () => selectSkin(key);
-        const preview = document.createElement('div');
-        preview.className = 'skin-preview';
-        preview.style.backgroundColor = skin.block;
-        const name = document.createElement('span');
-        name.className = 'skin-name';
-        name.innerText = skin.name;
-        div.appendChild(preview); div.appendChild(name);
-        list.appendChild(div);
-    }
-    document.getElementById('skin-modal').style.display = 'flex';
-}
-function closeSkinModal(e) {
-    if(e === null || e.target.id === 'skin-modal') {
-        sound.playButton();
-        document.getElementById('skin-modal').style.display = 'none';
-    }
-}
-function selectSkin(key) {
-    currentSkinKey = key;
-    localStorage.setItem('blockSkin', key);
-    sound.playPick();
-    openSkinModal();
-    draw();
-}
-
 
 function drawHand(skin, uiTheme) {
     const slotWidth = 400 / 3;
@@ -671,3 +675,20 @@ const roomInput = document.getElementById('roomInput');
 const nameInput = document.getElementById('nameInput');
 if(roomInput) { roomInput.addEventListener('click', () => sound.playType()); roomInput.addEventListener('input', () => sound.playType()); }
 if(nameInput) { nameInput.addEventListener('click', () => sound.playType()); nameInput.addEventListener('input', () => sound.playType()); }
+
+// ★初期設定の読み込み (起動時)
+if(localStorage.getItem('appTheme')) {
+    const saved = localStorage.getItem('appTheme');
+    const checkbox = document.getElementById('checkbox');
+    if(saved === 'light') {
+        currentTheme = 'light';
+        document.body.classList.add('light-mode');
+        document.getElementById('mode-label').innerText = "Light Mode";
+        if(checkbox) checkbox.checked = true;
+    } else {
+        currentTheme = 'dark';
+        document.body.classList.remove('light-mode');
+        document.getElementById('mode-label').innerText = "Dark Mode";
+        if(checkbox) checkbox.checked = false;
+    }
+}

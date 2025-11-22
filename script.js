@@ -94,7 +94,7 @@ class SoundManager {
         const bufferSize = this.ctx.sampleRate * 0.5;
         const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        for (let i = 0; i < bufferSize - 1; i++) data[i] = Math.random() * 2 - 1;
         const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
         const noiseFilter = this.ctx.createBiquadFilter(); noiseFilter.type = 'lowpass';
         noiseFilter.frequency.value = 1000 + (combo * 500);

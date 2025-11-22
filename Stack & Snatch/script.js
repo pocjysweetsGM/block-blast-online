@@ -6,113 +6,26 @@ const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
 const DRAG_OFFSET_Y = 80; 
 
-// --- UIテーマ (背景など) ---
-// Darkがデフォルト
-let isLightMode = false;
+const THEMES = {
+    dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
+    light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
+};
+
+// ★修正: デフォルトをDarkに戻す
+let currentTheme = 'dark'; 
 
 function toggleTheme(checkbox) {
-    isLightMode = checkbox.checked;
-    if (isLightMode) { 
-        document.body.classList.add('light-mode'); 
-        document.getElementById('mode-label').innerText = "Light Mode"; 
+    if (checkbox.checked) { 
+        // Checked = Light
+        currentTheme = 'light'; document.body.classList.add('light-mode'); document.getElementById('mode-label').innerText = "Light Mode"; 
     } else { 
-        document.body.classList.remove('light-mode'); 
-        document.getElementById('mode-label').innerText = "Dark Mode"; 
+        // Unchecked = Dark
+        currentTheme = 'dark'; document.body.classList.remove('light-mode'); document.getElementById('mode-label').innerText = "Dark Mode"; 
     }
     draw();
 }
 
-// --- ブロックスキン定義 ---
-// 各スキンは { block: 色, gloss: 光沢色, ghost: 予測色, highlight: ライン色 }
-const SKINS = {
-    classic: {
-        name: "Classic Blue",
-        block: '#3498db',
-        gloss: 'rgba(255,255,255,0.2)',
-        ghost: 'rgba(52, 152, 219, 0.3)',
-        highlight: 'rgba(46, 204, 113, 0.5)'
-    },
-    magma: {
-        name: "Magma Red",
-        block: '#e74c3c',
-        gloss: 'rgba(255,200,200,0.3)',
-        ghost: 'rgba(231, 76, 60, 0.3)',
-        highlight: 'rgba(241, 196, 15, 0.5)'
-    },
-    forest: {
-        name: "Forest Green",
-        block: '#27ae60',
-        gloss: 'rgba(200,255,200,0.2)',
-        ghost: 'rgba(46, 204, 113, 0.3)',
-        highlight: 'rgba(243, 156, 18, 0.5)'
-    },
-    cyber: {
-        name: "Cyber Pink",
-        block: '#e056fd',
-        gloss: 'rgba(255,255,255,0.4)',
-        ghost: 'rgba(224, 86, 253, 0.3)',
-        highlight: 'rgba(0, 206, 201, 0.5)'
-    },
-    mono: {
-        name: "Monochrome",
-        block: '#7f8c8d',
-        gloss: 'rgba(255,255,255,0.1)',
-        ghost: 'rgba(127, 140, 141, 0.3)',
-        highlight: 'rgba(44, 62, 80, 0.5)'
-    }
-};
-
-let currentSkinKey = 'classic';
-// localStorageから読み込み
-if(localStorage.getItem('blockSkin')) {
-    const saved = localStorage.getItem('blockSkin');
-    if(SKINS[saved]) currentSkinKey = saved;
-}
-
-// スキン変更モーダル
-function openSkinModal() {
-    sound.playButton();
-    const list = document.getElementById('skin-list');
-    list.innerHTML = "";
-    
-    for (const [key, skin] of Object.entries(SKINS)) {
-        const div = document.createElement('div');
-        div.className = `skin-item ${key === currentSkinKey ? 'selected' : ''}`;
-        div.onclick = () => selectSkin(key);
-        
-        // プレビューの四角
-        const preview = document.createElement('div');
-        preview.className = 'skin-preview';
-        preview.style.backgroundColor = skin.block;
-        
-        const name = document.createElement('span');
-        name.className = 'skin-name';
-        name.innerText = skin.name;
-        
-        div.appendChild(preview);
-        div.appendChild(name);
-        list.appendChild(div);
-    }
-    
-    document.getElementById('skin-modal').style.display = 'flex';
-}
-
-function closeSkinModal(e) {
-    if(e === null || e.target.id === 'skin-modal') {
-        sound.playButton();
-        document.getElementById('skin-modal').style.display = 'none';
-    }
-}
-
-function selectSkin(key) {
-    currentSkinKey = key;
-    localStorage.setItem('blockSkin', key); // 保存
-    sound.playPick();
-    openSkinModal(); // 再描画して選択状態更新
-    draw(); // ゲーム画面も更新
-}
-
-// --- 音 ---
+// SoundManager (同じ)
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -136,7 +49,6 @@ class SoundManager {
         this._tone(freq, freq * 2, 0.3, 'triangle');
     }
     playButton() { this._tone(800, 800, 0.05, 'sine', 0.05); }
-    playType() { this._tone(2000, 500, 0.03, 'sawtooth', 0.05); }
     _tone(f1, f2, dur, type='sine', vol=0.1) {
         if(this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
@@ -164,15 +76,7 @@ const SHAPES = [
     [[1, 0], [1, 1], [1, 0]], [[0, 1], [1, 1], [0, 1]],
     [[1, 1, 0], [0, 1, 1]], [[0, 1, 1], [1, 1, 0]],
     [[0, 1], [1, 1], [1, 0]], [[1, 0], [1, 1], [0, 1]],
-    [[1, 0], [0, 1]], [[0, 1], [1, 0]],
-    // 追加分
-    [[1, 1, 1], [1, 0, 0], [1, 0, 0]], [[1, 1, 1], [0, 0, 1], [0, 0, 1]],
-    [[0, 0, 1], [0, 0, 1], [1, 1, 1]], [[1, 0, 0], [1, 0, 0], [1, 1, 1]],
-    [[1, 0], [0, 1]], [[0, 1], [1, 0]],
-    [[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[0, 0, 1], [0, 1, 0], [1, 0, 0]],
-    [[0, 1, 0], [1, 1, 1], [0, 1, 0]],
-    [[1, 0, 1], [1, 1, 1]], [[1, 1, 1], [1, 0, 1]],
-    [[1, 1], [1, 0], [1, 1]], [[1, 1], [0, 1], [1, 1]]
+    [[1, 0], [0, 1]], [[0, 1], [1, 0]]
 ];
 
 let board = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
@@ -196,7 +100,6 @@ let voteNotificationTimer = null;
 let prevSkipVotesLen = 0;
 let comboCount = 0;
 let lastClearTurnId = -1;
-let lastSentTime = 0;
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -298,6 +201,7 @@ async function triggerAutoPass() {
     overlay.classList.remove('active');
 }
 
+// --- 通信関連 ---
 function startGame() {
     sound.playButton();
     const roomInput = document.getElementById('roomInput').value.trim();
@@ -306,8 +210,10 @@ function startGame() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
+    
     if (ws) ws.close();
     ws = new WebSocket(url);
+
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
@@ -317,6 +223,7 @@ function startGame() {
         if(timerInterval) clearInterval(timerInterval);
         timerInterval = setInterval(checkTurnTimer, 1000);
     };
+
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "error") showModal("ERROR", data.message, () => location.reload());
@@ -324,7 +231,6 @@ function startGame() {
             myPlayerId = data.your_id;
             document.getElementById('player-badge').innerText = `${data.your_name} (YOU)`;
             
-            // ★設定パネルロジック
             const overlay = document.getElementById('setup-overlay');
             if (!data.is_playing) {
                 overlay.style.display = 'flex';
@@ -395,7 +301,6 @@ function startGame() {
             }
         }
         else if (data.type === "init") updateBoard(data.board);
-        
         else if (data.type === "game_over") {
             showGameOver(data.ranking);
         }
@@ -444,6 +349,23 @@ function showGameOver(ranking) {
     }
 }
 
+// ★修正: ボタンクリック時の処理
+function handleSkipAction() {
+    sound.playButton();
+    const now = Date.now() / 1000;
+    const diff = now - turnStartTime;
+    
+    if (currentTurnId === myPlayerId) {
+        // 自分のターン: いつでもスキップ可能
+        manualPass();
+    } else {
+        // 他人のターン: 60秒経過後のみ投票可能
+        if (diff > 60) {
+            ws.send(JSON.stringify({type: 'vote_skip'}));
+        }
+    }
+}
+
 function manualPass() {
     showModal("SKIP TURN", "本当にスキップしますか？", () => {
         currentHand = [null, null, null];
@@ -454,9 +376,9 @@ function manualPass() {
 function checkTurnTimer() {
     if (!turnStartTime) return;
     const now = Date.now() / 1000; const diff = now - turnStartTime;
-    const skipBtn = document.getElementById('action-skip-btn');
+    const skipBtn = document.getElementById('action-skip-btn'); // ★ID修正
     if (skipBtn) {
-        updateButtons();
+        updateButtons(); // ボタンの状態を更新
     }
 }
 
@@ -468,12 +390,12 @@ function updateButtons() {
     const skipIcon = document.getElementById('skip-icon');
     
     if (currentTurnId === myPlayerId) {
-        // 自分のターン
+        // 自分のターン: スキップボタン
         skipBtn.className = 'icon-btn self-skip'; 
         skipIcon.innerText = 'skip_next'; 
         skipBtn.disabled = false;
     } else {
-        // 他人のターン
+        // 他人のターン: 投票ボタン
         const now = Date.now() / 1000; 
         const diff = now - turnStartTime;
         
@@ -489,6 +411,7 @@ function updateButtons() {
         }
     }
 }
+
 function updateVotePopup() {
     const popup = document.getElementById('vote-status-popup');
     const countDisplay = document.getElementById('vote-count-display');
@@ -511,16 +434,6 @@ window.voteReset = function() { sound.playButton(); ws.send(JSON.stringify({type
 window.voteSkip = function() { sound.playButton(); ws.send(JSON.stringify({type: 'vote_skip'})); };
 window.vetoSkip = function() { sound.playButton(); ws.send(JSON.stringify({type: 'veto_skip'})); };
 window.handleExit = function() { showModal("EXIT", "退出しますか？", () => { if (ws) { ws.close(); ws = null; } location.reload(); }, true); };
-function handleSkipAction() {
-    sound.playButton();
-    const now = Date.now() / 1000;
-    const diff = now - turnStartTime;
-    if (currentTurnId === myPlayerId) {
-        manualPass();
-    } else {
-        if (diff > 60) ws.send(JSON.stringify({type: 'vote_skip'}));
-    }
-}
 function kickPlayer(targetId) { if(confirm("Kick this player?")) ws.send(JSON.stringify({type: 'kick_player', target_id: targetId})); }
 function openRankingModal() { sound.playButton(); document.getElementById('ranking-modal').style.display = 'flex'; }
 function closeRankingModal(e) { if(e === null || e.target.id === 'ranking-modal') { sound.playButton(); document.getElementById('ranking-modal').style.display = 'none'; } }
@@ -553,61 +466,45 @@ function updateRanking(rankingData) {
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 
-// ★描画ループ (修正: UIテーマとブロックスキンを分離)
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
-    
-    // UIテーマ (背景色など)
-    const uiTheme = isLightMode ? THEMES.light : THEMES.dark;
-    
-    // ブロックスキン (ブロックの色)
-    const skin = SKINS[currentSkinKey] || SKINS.classic;
-
+    const theme = THEMES[currentTheme];
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // 背景描画
-    ctx.fillStyle = uiTheme.boardBg; ctx.fillRect(0, 0, canvas.width, 400);
-    ctx.fillStyle = uiTheme.handBg; ctx.fillRect(0, 400, canvas.width, 200);
+    ctx.fillStyle = theme.boardBg; ctx.fillRect(0, 0, canvas.width, 400);
+    ctx.fillStyle = theme.handBg; ctx.fillRect(0, 400, canvas.width, 200);
 
-    // グリッド線
     for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
             const x = col * CELL_SIZE; const y = row * CELL_SIZE;
-            ctx.strokeStyle = uiTheme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+            ctx.strokeStyle = theme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
             if (board[row][col] === 1) {
-                // ★ブロック色はスキンから取得
-                ctx.fillStyle = skin.block; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
-                ctx.fillStyle = skin.gloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12);
+                ctx.fillStyle = theme.blockColor; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+                ctx.fillStyle = theme.blockGloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12);
             }
         }
     }
-    ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = uiTheme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(400, 400); ctx.strokeStyle = theme.separator; ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 1;
 
-    // ドラッグ処理
     if (draggingIdx !== -1 && currentTurnId === myPlayerId && !isClearing) {
         const shape = currentHand[draggingIdx];
         const placeCol = Math.round(dragX / CELL_SIZE); const placeRow = Math.round(dragY / CELL_SIZE);
         if (canFit(shape, placeRow, placeCol)) {
             const lines = checkPotentialClears(shape, placeRow, placeCol);
             if (lines.rows.length > 0 || lines.cols.length > 0) {
-                ctx.fillStyle = skin.highlight; // ハイライトもスキンに合わせる
+                ctx.fillStyle = theme.highlightColor;
                 lines.rows.forEach(r => ctx.fillRect(0, r * CELL_SIZE, canvas.width, CELL_SIZE));
                 lines.cols.forEach(c => ctx.fillRect(c * CELL_SIZE, 0, CELL_SIZE, 400));
             }
-            ctx.fillStyle = skin.ghost;
+            ctx.fillStyle = theme.ghostColor;
             for(let r = 0; r < shape.length; r++) { for(let c = 0; c < shape[r].length; c++) { if(shape[r][c] === 1) { ctx.fillRect((placeCol + c) * CELL_SIZE, (placeRow + r) * CELL_SIZE, CELL_SIZE, CELL_SIZE); } } }
         }
     }
-    
-    // 手札描画 (第2引数にスキンを渡す)
-    drawHand(skin, uiTheme);
-    
+    drawHand(theme);
     for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); }
     requestAnimationFrame(draw);
 }
 
-// ★修正: 手札描画
-function drawHand(skin, uiTheme) {
+function drawHand(theme) {
     const slotWidth = 400 / 3;
     const slotCenterY = HAND_START_Y + (190 / 2);
 
@@ -626,25 +523,22 @@ function drawHand(skin, uiTheme) {
         const blockSize = 30 * scale;
 
         if (index === draggingIdx) {
-            // ドラッグ中 (50pxサイズ)
-            drawShape(shape, dragX, dragY, CELL_SIZE, skin.block, skin.gloss);
+            drawShape(shape, dragX, dragY, CELL_SIZE, 'rgba(52, 152, 219, 0.7)', theme);
         } else {
-            // 待機中 (グレーアウト判定)
-            const color = (currentTurnId === myPlayerId && !isClearing) ? skin.block : uiTheme.inactiveHand;
-            const gloss = (currentTurnId === myPlayerId && !isClearing) ? skin.gloss : null;
-            drawShape(shape, slotCenterX - drawW/2, slotCenterY - drawH/2, blockSize, color, gloss);
+            const color = (currentTurnId === myPlayerId && !isClearing) ? theme.blockColor : theme.inactiveHand;
+            drawShape(shape, slotCenterX - drawW/2, slotCenterY - drawH/2, blockSize, color, theme);
         }
     });
 }
 
-function drawShape(shape, startX, startY, size, color, gloss) {
+function drawShape(shape, startX, startY, size, color, theme) {
     ctx.fillStyle = color;
     for(let r = 0; r < shape.length; r++) {
         for(let c = 0; c < shape[r].length; c++) {
             if(shape[r][c] === 1) {
                 ctx.fillRect(startX + c * size, startY + r * size, size - 2, size - 2);
-                if (gloss) {
-                    ctx.fillStyle = gloss;
+                if (theme && theme.blockGloss) {
+                    ctx.fillStyle = theme.blockGloss;
                     ctx.fillRect(startX + c * size + 2, startY + r * size + 2, size - 6, 4);
                     ctx.fillStyle = color;
                 }
@@ -702,12 +596,8 @@ function handleEnd(e) {
         draggingIdx = -1;
     }
 }
+let lastSentTime = 0;
 canvas.addEventListener('mousedown', handleStart); canvas.addEventListener('mousemove', handleMove); canvas.addEventListener('mouseup', handleEnd); canvas.addEventListener('touchstart', handleStart, {passive: false}); canvas.addEventListener('touchmove', handleMove, {passive: false}); canvas.addEventListener('touchend', handleEnd, {passive: false});
 
 // ★初期化時にも手札を作る
 if(currentHand.length === 0) refillHand();
-// 入力フォームの効果音
-const roomInput = document.getElementById('roomInput');
-const nameInput = document.getElementById('nameInput');
-if(roomInput) { roomInput.addEventListener('click', () => sound.playType()); roomInput.addEventListener('input', () => sound.playType()); }
-if(nameInput) { nameInput.addEventListener('click', () => sound.playType()); nameInput.addEventListener('input', () => sound.playType()); }

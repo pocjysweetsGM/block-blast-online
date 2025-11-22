@@ -6,23 +6,30 @@ const BOARD_SIZE = 8;
 const HAND_START_Y = 415; 
 const DRAG_OFFSET_Y = 80; 
 
+// --- テーマ定義 ---
 const THEMES = {
     dark: { boardBg:'#2c3e50', gridLine:'#34495e', handBg:'#2c3e50', separator:'#7f8c8d', blockColor:'#3498db', blockGloss:'rgba(255,255,255,0.2)', inactiveHand:'#7f8c8d', ghostColor: 'rgba(52, 152, 219, 0.3)', highlightColor: 'rgba(46, 204, 113, 0.5)' },
     light: { boardBg:'#ffffff', gridLine:'#dfe6e9', handBg:'#f0f2f5', separator:'#b2bec3', blockColor:'#0984e3', blockGloss:'rgba(255,255,255,0.4)', inactiveHand:'#b2bec3', ghostColor: 'rgba(9, 132, 227, 0.3)', highlightColor: 'rgba(0, 184, 148, 0.5)' }
 };
 
-// ★修正: デフォルトDark
-let currentTheme = 'dark'; 
+// --- ★重要: SKINS定義をここに移動！ ---
+const SKINS = {
+    classic: { name: "Classic Blue", block: '#3498db', gloss: 'rgba(255,255,255,0.2)', ghost: 'rgba(52, 152, 219, 0.3)', highlight: 'rgba(46, 204, 113, 0.5)' },
+    magma: { name: "Magma Red", block: '#e74c3c', gloss: 'rgba(255,200,200,0.3)', ghost: 'rgba(231, 76, 60, 0.3)', highlight: 'rgba(241, 196, 15, 0.5)' },
+    forest: { name: "Forest Green", block: '#27ae60', gloss: 'rgba(200,255,200,0.2)', ghost: 'rgba(46, 204, 113, 0.3)', highlight: 'rgba(243, 156, 18, 0.5)' },
+    cyber: { name: "Cyber Pink", block: '#e056fd', gloss: 'rgba(255,255,255,0.4)', ghost: 'rgba(224, 86, 253, 0.3)', highlight: 'rgba(0, 206, 201, 0.5)' },
+    mono: { name: "Monochrome", block: '#7f8c8d', gloss: 'rgba(255,255,255,0.1)', ghost: 'rgba(127, 140, 141, 0.3)', highlight: 'rgba(44, 62, 80, 0.5)' }
+};
+
+let currentTheme = 'dark'; // デフォルト
 
 function toggleTheme(checkbox) {
     if (checkbox.checked) { 
-        // ON = Light
         currentTheme = 'light'; 
         document.body.classList.add('light-mode'); 
         document.getElementById('mode-label').innerText = "Light Mode"; 
         localStorage.setItem('appTheme', 'light');
     } else { 
-        // OFF = Dark
         currentTheme = 'dark'; 
         document.body.classList.remove('light-mode'); 
         document.getElementById('mode-label').innerText = "Dark Mode"; 
@@ -31,7 +38,52 @@ function toggleTheme(checkbox) {
     draw();
 }
 
-// (SoundManagerなどは変更なし)
+let currentSkinKey = 'classic';
+if(localStorage.getItem('blockSkin') && SKINS[localStorage.getItem('blockSkin')]) {
+    currentSkinKey = localStorage.getItem('blockSkin');
+}
+
+function openSkinModal() {
+    sound.playButton();
+    const list = document.getElementById('skin-list');
+    list.innerHTML = "";
+    
+    for (const [key, skin] of Object.entries(SKINS)) {
+        const div = document.createElement('div');
+        div.className = `skin-item ${key === currentSkinKey ? 'selected' : ''}`;
+        div.onclick = () => selectSkin(key);
+        
+        const preview = document.createElement('div');
+        preview.className = 'skin-preview';
+        preview.style.backgroundColor = skin.block;
+        
+        const name = document.createElement('span');
+        name.className = 'skin-name';
+        name.innerText = skin.name;
+        
+        div.appendChild(preview);
+        div.appendChild(name);
+        list.appendChild(div);
+    }
+    document.getElementById('skin-modal').style.display = 'flex';
+}
+
+function closeSkinModal(e) {
+    if(e === null || e.target.id === 'skin-modal') {
+        sound.playButton();
+        document.getElementById('skin-modal').style.display = 'none';
+    }
+}
+
+function selectSkin(key) {
+    currentSkinKey = key;
+    localStorage.setItem('blockSkin', key);
+    sound.playPick();
+    openSkinModal();
+    draw();
+}
+
+// --- Sound Manager ---
 class SoundManager {
     constructor() { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
     playPick() { this._tone(600, 800, 0.1); }
@@ -115,43 +167,6 @@ let prevSkipVotesLen = 0;
 let comboCount = 0;
 let lastClearTurnId = -1;
 let lastSentTime = 0;
-let currentSkinKey = 'classic';
-if(localStorage.getItem('blockSkin') && SKINS[localStorage.getItem('blockSkin')]) {
-    currentSkinKey = localStorage.getItem('blockSkin');
-}
-
-function openSkinModal() {
-    sound.playButton();
-    const list = document.getElementById('skin-list');
-    list.innerHTML = "";
-    for (const [key, skin] of Object.entries(SKINS)) {
-        const div = document.createElement('div');
-        div.className = `skin-item ${key === currentSkinKey ? 'selected' : ''}`;
-        div.onclick = () => selectSkin(key);
-        const preview = document.createElement('div');
-        preview.className = 'skin-preview';
-        preview.style.backgroundColor = skin.block;
-        const name = document.createElement('span');
-        name.className = 'skin-name';
-        name.innerText = skin.name;
-        div.appendChild(preview); div.appendChild(name);
-        list.appendChild(div);
-    }
-    document.getElementById('skin-modal').style.display = 'flex';
-}
-function closeSkinModal(e) {
-    if(e === null || e.target.id === 'skin-modal') {
-        sound.playButton();
-        document.getElementById('skin-modal').style.display = 'none';
-    }
-}
-function selectSkin(key) {
-    currentSkinKey = key;
-    localStorage.setItem('blockSkin', key);
-    sound.playPick();
-    openSkinModal();
-    draw();
-}
 
 function showModal(title, message, onConfirm, isConfirm = false) {
     const modal = document.getElementById('custom-modal');
@@ -262,8 +277,10 @@ function startGame() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const url = `${protocol}//${host}/ws/${encodeURIComponent(roomInput)}?nickname=${encodeURIComponent(nameInput)}`;
+    
     if (ws) ws.close();
     ws = new WebSocket(url);
+
     ws.onopen = function() {
         document.getElementById('title-screen').style.display = 'none';
         document.getElementById('game-container').style.display = 'flex';
@@ -406,7 +423,6 @@ function showGameOver(ranking) {
     }
 }
 
-// ★修正: 欠けていた関数を定義
 function handleSkipAction() {
     sound.playButton();
     const now = Date.now() / 1000;
@@ -497,6 +513,7 @@ function updateTurnDisplay(ranking) { ranking.forEach(p => playerNames[p.id] = p
 function updateRanking(rankingData) { 
     const list = document.getElementById('score-list'); list.innerHTML = ""; 
     const fullList = document.getElementById('full-score-list'); fullList.innerHTML = "";
+    
     rankingData.forEach((player, index) => { 
         const isMe = (player.id === myPlayerId); 
         let text = player.name.toUpperCase(); 
@@ -520,14 +537,13 @@ function updateRanking(rankingData) {
 class Particle { constructor(x, y, color) { this.x = x; this.y = y; this.vx = (Math.random() - 0.5) * 10; this.vy = (Math.random() - 0.5) * 10; this.life = 1.0; this.color = color; this.size = Math.random() * 10 + 5; this.gravity = 0.5; } update() { this.x += this.vx; this.y += this.vy; this.vy += this.gravity; this.life -= 0.02; this.size *= 0.95; } draw(ctx) { ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.fillRect(this.x, this.y, this.size, this.size); ctx.globalAlpha = 1.0; } }
 function createExplosion(col, row) { const centerX = col * CELL_SIZE + CELL_SIZE / 2; const centerY = row * CELL_SIZE + CELL_SIZE / 2; for(let i=0; i<10; i++) { const colors = ['#3498db', '#2980b9', '#ecf0f1', '#00d2d3']; const color = colors[Math.floor(Math.random() * colors.length)]; particles.push(new Particle(centerX, centerY, color)); } }
 
-// ★描画ループ (UIテーマとブロックスキンを分離)
 function draw() {
     if(document.getElementById('game-container').style.display === 'none') return;
     
-    // UIテーマ (背景色など)
+    // UIテーマ
     const uiTheme = (currentTheme === 'light') ? THEMES.light : THEMES.dark;
     
-    // ブロックスキン (ブロックの色)
+    // ブロックスキン
     const skin = SKINS[currentSkinKey] || SKINS.classic;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -542,7 +558,6 @@ function draw() {
             const x = col * CELL_SIZE; const y = row * CELL_SIZE;
             ctx.strokeStyle = uiTheme.gridLine; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
             if (board[row][col] === 1) {
-                // ★ブロック色はスキンから取得
                 ctx.fillStyle = skin.block; ctx.fillRect(x + 2, y + 2, CELL_SIZE - 4, CELL_SIZE - 4);
                 ctx.fillStyle = skin.gloss; ctx.fillRect(x + 5, y + 5, CELL_SIZE - 10, 12);
             }
@@ -557,7 +572,7 @@ function draw() {
         if (canFit(shape, placeRow, placeCol)) {
             const lines = checkPotentialClears(shape, placeRow, placeCol);
             if (lines.rows.length > 0 || lines.cols.length > 0) {
-                ctx.fillStyle = skin.highlight; // ハイライトもスキンに合わせる
+                ctx.fillStyle = skin.highlight; // ハイライト
                 lines.rows.forEach(r => ctx.fillRect(0, r * CELL_SIZE, canvas.width, CELL_SIZE));
                 lines.cols.forEach(c => ctx.fillRect(c * CELL_SIZE, 0, CELL_SIZE, 400));
             }
@@ -566,7 +581,6 @@ function draw() {
         }
     }
     
-    // 手札描画 (第2引数にスキン、第3引数にUIテーマを渡す)
     drawHand(skin, uiTheme);
     
     for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.update(); p.draw(ctx); if (p.life <= 0) particles.splice(i, 1); }
